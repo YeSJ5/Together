@@ -2,6 +2,8 @@
 
 TOGETHER is a QR-based real-time multi-user audio streaming system built for nearby group listening. One host device shares live device audio, listeners scan a QR code, and each listener receives the stream through WebRTC with Socket.IO signaling.
 
+[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/YeSJ5/Together)
+
 ## Product Goal
 
 - Host plays audio from laptop, browser tab, video player, or music app
