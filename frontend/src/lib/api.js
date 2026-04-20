@@ -1,0 +1,82 @@
+import { API_BASE_URL } from "../config";
+
+async function handleResponse(response) {
+  const data = await response.json().catch(() => ({}));
+
+  if (!response.ok) {
+    throw new Error(data.message || "Request failed.");
+  }
+
+  return data;
+}
+
+export async function createSession(payload) {
+  const response = await fetch(`${API_BASE_URL}/create-session`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  return handleResponse(response);
+}
+
+export async function fetchSession(roomId) {
+  const response = await fetch(`${API_BASE_URL}/session/${roomId}`);
+  return handleResponse(response);
+}
+
+export async function joinSession(roomId, payload) {
+  const response = await fetch(`${API_BASE_URL}/session/${roomId}/join`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  return handleResponse(response);
+}
+
+export async function leaveSession(roomId, payload) {
+  const response = await fetch(`${API_BASE_URL}/session/${roomId}/leave`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  return handleResponse(response);
+}
+
+export async function sendSessionEvent(roomId, payload) {
+  const response = await fetch(`${API_BASE_URL}/session/${roomId}/events`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  return handleResponse(response);
+}
+
+export async function fetchSessionEvents(roomId, clientId, since = 0) {
+  const response = await fetch(
+    `${API_BASE_URL}/session/${roomId}/events?clientId=${encodeURIComponent(
+      clientId
+    )}&since=${since}`
+  );
+
+  return handleResponse(response);
+}
+
+export async function endSession(roomId) {
+  const response = await fetch(`${API_BASE_URL}/session/${roomId}`, {
+    method: "DELETE"
+  });
+
+  return handleResponse(response);
+}
