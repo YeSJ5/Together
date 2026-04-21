@@ -3,6 +3,7 @@
   "version": "1.0.0",
   "main": "src/server.js",
   "scripts": {
+    "build": "node -e \"console.log('TOGETHER backend does not require a separate build step.')\"",
     "dev": "node --watch src/server.js",
     "start": "node src/server.js"
   },
