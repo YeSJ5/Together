@@ -2,7 +2,6 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import QRCode from "react-qr-code";
 import AppShell from "../components/AppShell";
 import StatusBadge from "../components/StatusBadge";
-import { PUBLIC_APP_URL } from "../config";
 import {
   createSession,
   endSession,
@@ -10,11 +9,12 @@ import {
   fetchSessionEvents,
   sendSessionEvent
 } from "../lib/api";
+import { createAppId } from "../lib/ids";
 import { clearHostSession, saveHostSession } from "../lib/storage";
 import { captureHostAudio, createPeerConnection } from "../lib/webrtc";
 
 function makeHostId() {
-  return `host-${crypto.randomUUID()}`;
+  return createAppId("host");
 }
 
 function detectMobileHost() {
@@ -37,6 +37,7 @@ export default function HostDashboardPage() {
   const [isStarting, setIsStarting] = useState(false);
   const [audioDebug, setAudioDebug] = useState("No active capture");
   const [hostSignalDebug, setHostSignalDebug] = useState("Signaling idle");
+  const [publicJoinOrigin, setPublicJoinOrigin] = useState(window.location.origin);
   const streamRef = useRef(null);
   const captureStreamRef = useRef(null);
   const audioContextRef = useRef(null);
@@ -54,12 +55,26 @@ export default function HostDashboardPage() {
       return "";
     }
 
-    return `${PUBLIC_APP_URL}/join/${session.roomId}`;
+    return `${publicJoinOrigin}/join/${session.roomId}`;
   }, [session]);
 
   const canUseDeviceAudio = Boolean(navigator.mediaDevices?.getDisplayMedia);
 
   useEffect(() => {
+    fetch("/api/runtime")
+      .then((response) => response.json())
+      .then((data) => {
+        if (window.location.hostname === "localhost" && data.lanOrigin) {
+          setPublicJoinOrigin(data.lanOrigin);
+          return;
+        }
+
+        setPublicJoinOrigin(data.currentOrigin || window.location.origin);
+      })
+      .catch(() => {
+        setPublicJoinOrigin(window.location.origin);
+      });
+
     return () => {
       teardownLocalSession();
     };

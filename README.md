@@ -94,11 +94,7 @@ Example session shape:
 ### 1. Install dependencies
 
 ```bash
-cd backend
-npm install
-
-cd ../frontend
-npm install
+npm run setup
 ```
 
 ### 2. Configure environment variables
@@ -121,36 +117,28 @@ VITE_PUBLIC_APP_URL=http://localhost:5173
 
 ### 3. Run locally
 
-Backend:
+Build the frontend once:
 
 ```bash
-cd backend
-npm run dev
+npm run build
 ```
 
-Frontend:
+Start the unified host server:
 
 ```bash
-cd frontend
-npm run dev
+npm start
 ```
 
-For phone testing on the same Wi-Fi:
+Open `http://localhost:5000` on the host laptop. The app will automatically
+generate a QR code using the laptop's LAN IP so nearby phones on the same
+Wi-Fi or hotspot can join directly.
 
-```bash
-cd frontend
-npm run dev:network
-```
+### LAN demo mode
 
-Open `http://localhost:5173`.
-
-### Phone testing on the same Wi-Fi
-
-- Start the backend with `PORT=5000`
-- Start the frontend with `npm run dev -- --host 0.0.0.0`
-- Open the frontend from your laptop using `http://YOUR-LAPTOP-IP:5173`
-- The generated QR code will then point to the LAN URL instead of `localhost`
-- On your phone, open the same LAN URL or scan the QR while both devices are on the same Wi-Fi or hotspot
+- Host opens `http://localhost:5000`
+- QR code resolves to `http://YOUR-LAPTOP-IP:5000/join/...`
+- Listener joins from any phone or laptop on the same Wi-Fi or hotspot
+- This is the recommended demo setup for classrooms, seminars, and project evaluation
 
 ## Browser Support
 
@@ -200,6 +188,10 @@ CLIENT_ORIGIN=https://your-frontend.vercel.app
 ```text
 https://together-backend.onrender.com
 ```
+
+The backend is safe to deploy independently. If the frontend bundle is not
+present in the Render service, the root path returns a small backend status
+response instead of failing.
 
 ### Deploy frontend on Vercel
 

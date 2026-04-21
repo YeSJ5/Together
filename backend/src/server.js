@@ -1,5 +1,8 @@
 const express = require("express");
 const http = require("http");
+const fs = require("fs");
+const os = require("os");
+const path = require("path");
 const cors = require("cors");
 const { Server } = require("socket.io");
 const { ALLOWED_ORIGINS, PORT } = require("./config");
@@ -26,6 +29,20 @@ function isOriginAllowed(origin) {
   return ALLOWED_ORIGINS.includes(origin);
 }
 
+function getLocalIpv4Address() {
+  const interfaces = os.networkInterfaces();
+
+  for (const addresses of Object.values(interfaces)) {
+    for (const address of addresses || []) {
+      if (address.family === "IPv4" && !address.internal) {
+        return address.address;
+      }
+    }
+  }
+
+  return null;
+}
+
 app.use(
   cors({
     origin(origin, callback) {
@@ -39,8 +56,22 @@ app.use(
   })
 );
 app.use(express.json());
+app.use((request, response, next) => {
+  if (
+    request.path.startsWith("/api") ||
+    request.path.startsWith("/session") ||
+    request.path.startsWith("/create-session")
+  ) {
+    response.setHeader("Cache-Control", "no-store, no-cache, must-revalidate, proxy-revalidate");
+    response.setHeader("Pragma", "no-cache");
+    response.setHeader("Expires", "0");
+    response.setHeader("Surrogate-Control", "no-store");
+  }
 
-app.get("/", (_request, response) => {
+  next();
+});
+
+app.get("/api", (_request, response) => {
   response.json({
     product: "TOGETHER",
     status: "running"
@@ -51,6 +82,18 @@ app.get("/api/health", (_request, response) => {
   response.json({
     product: "TOGETHER",
     status: "ok"
+  });
+});
+
+app.get("/api/runtime", (request, response) => {
+  const forwardedProtocol = request.headers["x-forwarded-proto"];
+  const protocol = forwardedProtocol || request.protocol || "http";
+  const localIp = getLocalIpv4Address();
+  const lanOrigin = localIp ? `${protocol}://${localIp}:${PORT}` : null;
+
+  response.json({
+    lanOrigin,
+    currentOrigin: `${protocol}://${request.get("host")}`
   });
 });
 
@@ -236,6 +279,35 @@ app.delete("/session/:id", (request, response) => {
   });
 });
 
+const clientDistPath = path.resolve(__dirname, "../../frontend/dist");
+const clientIndexPath = path.join(clientDistPath, "index.html");
+const hasBundledFrontend = fs.existsSync(clientIndexPath);
+
+if (hasBundledFrontend) {
+  app.use(express.static(clientDistPath));
+
+  app.get("*", (request, response, next) => {
+    if (
+      request.path.startsWith("/api") ||
+      request.path.startsWith("/session") ||
+      request.path.startsWith("/create-session")
+    ) {
+      next();
+      return;
+    }
+
+    response.sendFile(clientIndexPath);
+  });
+} else {
+  app.get("/", (_request, response) => {
+    response.json({
+      product: "TOGETHER",
+      status: "backend-only",
+      message: "Frontend is deployed separately. Use the Vercel app URL for the web interface."
+    });
+  });
+}
+
 const io = new Server(server, {
   cors: {
     origin(origin, callback) {
@@ -403,6 +475,12 @@ io.on("connection", (socket) => {
   });
 });
 
-server.listen(PORT, () => {
+server.listen(PORT, "0.0.0.0", () => {
+  const localIp = getLocalIpv4Address();
   console.log(`TOGETHER backend listening on port ${PORT}`);
+  console.log(`Local app: http://localhost:${PORT}`);
+
+  if (localIp) {
+    console.log(`LAN app: http://${localIp}:${PORT}`);
+  }
 });

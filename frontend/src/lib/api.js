@@ -13,6 +13,7 @@ async function handleResponse(response) {
 export async function createSession(payload) {
   const response = await fetch(`${API_BASE_URL}/create-session`, {
     method: "POST",
+    cache: "no-store",
     headers: {
       "Content-Type": "application/json"
     },
@@ -23,13 +24,16 @@ export async function createSession(payload) {
 }
 
 export async function fetchSession(roomId) {
-  const response = await fetch(`${API_BASE_URL}/session/${roomId}`);
+  const response = await fetch(`${API_BASE_URL}/session/${roomId}`, {
+    cache: "no-store"
+  });
   return handleResponse(response);
 }
 
 export async function joinSession(roomId, payload) {
   const response = await fetch(`${API_BASE_URL}/session/${roomId}/join`, {
     method: "POST",
+    cache: "no-store",
     headers: {
       "Content-Type": "application/json"
     },
@@ -42,6 +46,7 @@ export async function joinSession(roomId, payload) {
 export async function leaveSession(roomId, payload) {
   const response = await fetch(`${API_BASE_URL}/session/${roomId}/leave`, {
     method: "POST",
+    cache: "no-store",
     headers: {
       "Content-Type": "application/json"
     },
@@ -54,6 +59,7 @@ export async function leaveSession(roomId, payload) {
 export async function sendSessionEvent(roomId, payload) {
   const response = await fetch(`${API_BASE_URL}/session/${roomId}/events`, {
     method: "POST",
+    cache: "no-store",
     headers: {
       "Content-Type": "application/json"
     },
@@ -67,7 +73,10 @@ export async function fetchSessionEvents(roomId, clientId, since = 0) {
   const response = await fetch(
     `${API_BASE_URL}/session/${roomId}/events?clientId=${encodeURIComponent(
       clientId
-    )}&since=${since}`
+    )}&since=${since}&_=${Date.now()}`,
+    {
+      cache: "no-store"
+    }
   );
 
   return handleResponse(response);
@@ -75,7 +84,8 @@ export async function fetchSessionEvents(roomId, clientId, since = 0) {
 
 export async function endSession(roomId) {
   const response = await fetch(`${API_BASE_URL}/session/${roomId}`, {
-    method: "DELETE"
+    method: "DELETE",
+    cache: "no-store"
   });
 
   return handleResponse(response);

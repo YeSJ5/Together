@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import AppShell from "../components/AppShell";
 import StatusBadge from "../components/StatusBadge";
 import { fetchSession } from "../lib/api";
+import { createAppId } from "../lib/ids";
 import { saveListenerSession } from "../lib/storage";
 
 export default function ListenerJoinPage() {
@@ -13,6 +14,7 @@ export default function ListenerJoinPage() {
   const [status, setStatus] = useState("Checking room");
   const [error, setError] = useState("");
   const [username, setUsername] = useState("");
+  const [isJoining, setIsJoining] = useState(false);
 
   useEffect(() => {
     if (!roomId) {
@@ -56,18 +58,28 @@ export default function ListenerJoinPage() {
         return;
       }
 
-      navigate(`/join/${nextRoomId}`);
+      setIsJoining(true);
+      window.location.assign(`${window.location.origin}/join/${nextRoomId}`);
       return;
     }
 
-    const listenerId = `listener-${crypto.randomUUID()}`;
-    saveListenerSession({
-      roomId,
-      listenerId,
-      username: username.trim() || "Guest Listener",
-      hostId: room?.hostId || ""
-    });
-    navigate(`/session/${roomId}`);
+    try {
+      setIsJoining(true);
+      setStatus("Opening live session");
+      const listenerId = createAppId("listener");
+      saveListenerSession({
+        roomId,
+        listenerId,
+        username: username.trim() || "Guest Listener",
+        hostId: room?.hostId || ""
+      });
+
+      window.location.assign(`${window.location.origin}/session/${roomId}`);
+    } catch (_joinError) {
+      setIsJoining(false);
+      setStatus("Room ready");
+      setError("Could not open the live session on this device. Please retry.");
+    }
   }
 
   return (
@@ -104,8 +116,9 @@ export default function ListenerJoinPage() {
                   type="button"
                   className="button-primary large-button"
                   onClick={handleJoin}
+                  disabled={isJoining}
                 >
-                  Join Audio
+                  {isJoining ? "Opening..." : "Join Audio"}
                 </button>
               </>
             ) : (
@@ -123,8 +136,9 @@ export default function ListenerJoinPage() {
                   type="button"
                   className="button-primary large-button"
                   onClick={handleJoin}
+                  disabled={isJoining}
                 >
-                  Continue
+                  {isJoining ? "Opening..." : "Continue"}
                 </button>
               </>
             )}
