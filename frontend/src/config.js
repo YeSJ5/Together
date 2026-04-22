@@ -39,4 +39,6 @@ export const SOCKET_PATH = import.meta.env.VITE_SOCKET_PATH || "/socket.io";
 
 export const PUBLIC_APP_URL =
   import.meta.env.VITE_PUBLIC_APP_URL ||
-  (typeof window === "undefined" ? "http://localhost:5173" : window.location.origin);
+  (typeof window === "undefined"
+    ? "https://together-listen.vercel.app"
+    : window.location.origin);

@@ -112,7 +112,7 @@ Frontend `.env`:
 VITE_API_BASE_URL=http://localhost:5000
 VITE_SOCKET_URL=http://localhost:5000
 VITE_SOCKET_PATH=/socket.io
-VITE_PUBLIC_APP_URL=http://localhost:5173
+VITE_PUBLIC_APP_URL=https://together-listen.vercel.app
 ```
 
 ### 3. Run locally
@@ -236,7 +236,7 @@ npm run android:open
 
 ```bash
 PORT=5000
-CLIENT_ORIGIN=https://your-frontend.vercel.app
+CLIENT_ORIGIN=https://together-listen.vercel.app
 ```
 
 5. After deploy, note the backend URL, for example:
@@ -259,10 +259,10 @@ response instead of failing.
 VITE_API_BASE_URL=https://your-backend.onrender.com
 VITE_SOCKET_URL=https://your-backend.onrender.com
 VITE_SOCKET_PATH=/socket.io
-VITE_PUBLIC_APP_URL=https://your-frontend.vercel.app
+VITE_PUBLIC_APP_URL=https://together-listen.vercel.app
 ```
 
-4. After Vercel gives you the frontend URL, update Render `CLIENT_ORIGIN` to that exact URL if needed.
+4. Use `https://together-listen.vercel.app` as the canonical frontend URL and update Render `CLIENT_ORIGIN` to that exact URL if needed.
 
 ### Preview deployments
 
@@ -270,7 +270,7 @@ VITE_PUBLIC_APP_URL=https://your-frontend.vercel.app
 - Example:
 
 ```bash
-CLIENT_ORIGIN=https://your-frontend.vercel.app,https://your-frontend-git-main-yourteam.vercel.app
+CLIENT_ORIGIN=https://together-listen.vercel.app,https://your-frontend-git-main-yourteam.vercel.app
 ```
 
 ## Production Considerations
