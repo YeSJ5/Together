@@ -478,6 +478,10 @@ button {
   display: none;
 }
 
+.scanner-input {
+  display: none;
+}
+
 .player-card {
   display: grid;
   gap: 18px;

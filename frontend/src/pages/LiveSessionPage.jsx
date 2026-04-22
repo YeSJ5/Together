@@ -5,7 +5,6 @@ import StatusBadge from "../components/StatusBadge";
 import {
   fetchSessionEvents,
   joinSession,
-  leaveSessionInBackground,
   leaveSession,
   sendSessionEvent
 } from "../lib/api";
@@ -26,6 +25,8 @@ export default function LiveSessionPage() {
   const pollingRef = useRef(null);
   const latestEventIdRef = useRef(0);
   const wakeLockRef = useRef(null);
+  const connectedRef = useRef(false);
+  const awaitingGestureRef = useRef(false);
   const [status, setStatus] = useState("Connecting");
   const [error, setError] = useState("");
   const [volume, setVolume] = useState(100);
@@ -45,6 +46,16 @@ export default function LiveSessionPage() {
 
   function pushDiagnostic(message) {
     setDiagnostics((current) => [...current, message].slice(-10));
+  }
+
+  function updateConnected(nextConnected) {
+    connectedRef.current = nextConnected;
+    setConnected(nextConnected);
+  }
+
+  function updateAwaitingGesture(nextAwaitingGesture) {
+    awaitingGestureRef.current = nextAwaitingGesture;
+    setAwaitingGesture(nextAwaitingGesture);
   }
 
   async function requestWakeLock() {
@@ -129,9 +140,10 @@ export default function LiveSessionPage() {
 
         try {
           await audioRef.current.play();
-          setConnected(true);
+          updateConnected(true);
+          setError("");
           setStatus("Live");
-          setAwaitingGesture(false);
+          updateAwaitingGesture(false);
           setSessionNote(
             "Connected. Installed mode is best for screen-off playback, but some mobile browsers may still pause live audio in the background."
           );
@@ -139,7 +151,7 @@ export default function LiveSessionPage() {
           pushDiagnostic("Playback started successfully");
         } catch (_playbackError) {
           setStatus("Tap play to start audio");
-          setAwaitingGesture(true);
+          updateAwaitingGesture(true);
           setSessionNote("Your phone wants a tap before live audio can start. Tap the button once to continue.");
           syncMediaSession("paused");
           pushDiagnostic("Playback blocked until user taps play");
@@ -153,7 +165,8 @@ export default function LiveSessionPage() {
       pushDiagnostic(`Peer connection: ${nextState}`);
 
         if (nextState === "connected") {
-          setConnected(true);
+          updateConnected(true);
+          setError("");
           setStatus("Connected");
           setSessionNote(
             "Connected to the host. Waiting for the audio stream to begin."
@@ -209,7 +222,7 @@ export default function LiveSessionPage() {
         pollingRef.current = setTimeout(pollEvents, 1200);
       } catch (pollError) {
         if (String(pollError.message || "").includes("Session not found")) {
-          setConnected(false);
+          updateConnected(false);
           setStatus("Session ended");
           setError("The host session is no longer available.");
           setSessionNote("This room is no longer active.");
@@ -219,8 +232,13 @@ export default function LiveSessionPage() {
 
         setStatus("Network issue");
         pushDiagnostic(`Polling error: ${pollError.message}`);
-        setError("Phone could not connect to the live signaling server. Retry the session.");
-        setSessionNote("The app is trying to reconnect to the host.");
+        if (!connectedRef.current) {
+          setError("Phone could not connect to the live signaling server. Retry the session.");
+          setSessionNote("The app is trying to reconnect to the host.");
+        } else {
+          setError("");
+          setSessionNote("Audio is live. Connection checks are retrying quietly in the background.");
+        }
         pollingRef.current = setTimeout(pollEvents, 1800);
       }
     }
@@ -247,24 +265,16 @@ export default function LiveSessionPage() {
     function handleVisibilityChange() {
       if (document.visibilityState === "visible") {
         requestWakeLock();
-        if (audioRef.current?.srcObject && awaitingGesture === false) {
+        if (audioRef.current?.srcObject && awaitingGestureRef.current === false) {
           audioRef.current.play().catch(() => {});
         }
       }
     }
 
-    function handlePageHide() {
-      leaveSessionInBackground(roomId, {
-        listenerId: listener.listenerId
-      });
-    }
-
     document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("pagehide", handlePageHide);
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("pagehide", handlePageHide);
 
       if (pollingRef.current) {
         clearTimeout(pollingRef.current);
@@ -287,7 +297,7 @@ export default function LiveSessionPage() {
         disableNativeBackgroundPlayback().catch(() => {});
       }
     };
-  }, [awaitingGesture, navigate, roomId]);
+  }, [navigate, roomId]);
 
   function handleVolumeChange(event) {
     const nextVolume = Number(event.target.value);
@@ -305,9 +315,10 @@ export default function LiveSessionPage() {
 
     try {
       await audioRef.current.play();
-      setConnected(true);
+      updateConnected(true);
+      setError("");
       setStatus("Live");
-      setAwaitingGesture(false);
+      updateAwaitingGesture(false);
       setSessionNote("Connected. Your device is now playing the host audio.");
       syncMediaSession("playing");
       pushDiagnostic("Manual play succeeded");

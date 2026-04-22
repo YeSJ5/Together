@@ -12,6 +12,7 @@ export default function ListenerJoinPage() {
   const navigate = useNavigate();
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
+  const imageInputRef = useRef(null);
   const scannerStreamRef = useRef(null);
   const scannerFrameRef = useRef(null);
   const [room, setRoom] = useState(null);
@@ -75,6 +76,21 @@ export default function ListenerJoinPage() {
       stopScanner();
     };
   }, []);
+
+  function handleDetectedRoom(scannedValue) {
+    const matchedRoom = scannedValue.match(/\/join\/([A-Z0-9-]+)/i);
+
+    if (matchedRoom?.[1]) {
+      const normalizedRoom = matchedRoom[1].toUpperCase();
+      stopScanner();
+      setManualRoomId(normalizedRoom);
+      setIsJoining(true);
+      window.location.assign(`${window.location.origin}/join/${normalizedRoom}`);
+      return true;
+    }
+
+    return false;
+  }
 
   function stopScanner() {
     if (scannerFrameRef.current) {
@@ -142,17 +158,9 @@ export default function ListenerJoinPage() {
           });
 
           if (result?.data) {
-            const matchedRoom = result.data.match(/\/join\/([A-Z0-9-]+)/i);
-
-            if (matchedRoom?.[1]) {
-              const normalizedRoom = matchedRoom[1].toUpperCase();
-              stopScanner();
-              setManualRoomId(normalizedRoom);
-              setIsJoining(true);
-              window.location.assign(`${window.location.origin}/join/${normalizedRoom}`);
+            if (handleDetectedRoom(result.data)) {
               return;
             }
-
             setScanStatus("QR found, but it is not a TOGETHER join link");
           }
         } catch (_scanError) {
@@ -166,6 +174,66 @@ export default function ListenerJoinPage() {
     } catch (_error) {
       stopScanner();
       setError("Camera access was denied. Enter the room ID manually instead.");
+    }
+  }
+
+  function handleCaptureFallback() {
+    imageInputRef.current?.click();
+  }
+
+  async function handleQrImagePick(event) {
+    const file = event.target.files?.[0];
+    event.target.value = "";
+
+    if (!file) {
+      return;
+    }
+
+    setError("");
+    setScanStatus("Reading QR image");
+
+    try {
+      const imageUrl = URL.createObjectURL(file);
+      const image = new Image();
+
+      image.onload = () => {
+        try {
+          const canvas = canvasRef.current;
+          const context = canvas.getContext("2d", { willReadFrequently: true });
+
+          canvas.width = image.naturalWidth || image.width;
+          canvas.height = image.naturalHeight || image.height;
+          context.drawImage(image, 0, 0, canvas.width, canvas.height);
+
+          const imageData = context.getImageData(0, 0, canvas.width, canvas.height);
+          const result = jsQR(imageData.data, imageData.width, imageData.height, {
+            inversionAttempts: "attemptBoth"
+          });
+
+          URL.revokeObjectURL(imageUrl);
+
+          if (result?.data && handleDetectedRoom(result.data)) {
+            return;
+          }
+
+          setScanStatus("Could not read a TOGETHER QR from that image");
+          setError("That photo did not contain a valid TOGETHER join QR. Try again or enter the room ID.");
+        } catch (_decodeError) {
+          setScanStatus("Could not read that image");
+          setError("That image could not be scanned. Try a clearer photo or use manual room entry.");
+        }
+      };
+
+      image.onerror = () => {
+        URL.revokeObjectURL(imageUrl);
+        setScanStatus("Could not open that image");
+        setError("That image could not be opened. Try again.");
+      };
+
+      image.src = imageUrl;
+    } catch (_error) {
+      setScanStatus("Camera photo unavailable");
+      setError("Could not open the phone camera/photo picker. Enter the room ID manually instead.");
     }
   }
 
@@ -258,9 +326,25 @@ export default function ListenerJoinPage() {
                   >
                     {isScanning ? "Scanning QR..." : "Scan QR Code"}
                   </button>
+                  <button
+                    type="button"
+                    className="button-secondary large-button"
+                    onClick={handleCaptureFallback}
+                    disabled={isJoining}
+                  >
+                    Use Camera Photo
+                  </button>
+                  <input
+                    ref={imageInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="scanner-input"
+                    onChange={handleQrImagePick}
+                  />
                   {!scannerSupported ? (
                     <p className="subtle-text">
-                      QR scanning depends on browser camera support. Manual room entry is always available.
+                      Live scanning depends on browser camera support. Camera photo and manual room entry are always available.
                     </p>
                   ) : null}
                 </div>
