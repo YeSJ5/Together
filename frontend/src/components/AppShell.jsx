@@ -4,6 +4,7 @@ import { Link, useLocation } from "react-router-dom";
 export default function AppShell({ children, lockNavigation = false, lockLabel = "Session active" }) {
   const location = useLocation();
   const isHome = location.pathname === "/";
+  const showPwaPrompt = isHome;
 
   return (
     <div className="app-frame">
@@ -25,7 +26,7 @@ export default function AppShell({ children, lockNavigation = false, lockLabel =
             </Link>
           ) : null}
         </header>
-        <PwaPrompt />
+        {showPwaPrompt ? <PwaPrompt /> : null}
         {children}
       </main>
     </div>

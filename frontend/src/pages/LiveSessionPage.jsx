@@ -35,8 +35,9 @@ export default function LiveSessionPage() {
   const [diagnostics, setDiagnostics] = useState(["Opening listener session"]);
   const [awaitingGesture, setAwaitingGesture] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [wakeLockEnabled, setWakeLockEnabled] = useState(false);
   const [sessionNote, setSessionNote] = useState(
-    "Stay on this page until the stream starts. Installing the app gives the best chance of keeping audio alive when your phone screen dims."
+    "Stay on this page until the stream starts. On many phones, live browser audio is most reliable while the app stays visible."
   );
   const [isLeaving, setIsLeaving] = useState(false);
 
@@ -80,10 +81,23 @@ export default function LiveSessionPage() {
 
     try {
       wakeLockRef.current = await navigator.wakeLock.request("screen");
+      setWakeLockEnabled(true);
       pushDiagnostic("Screen wake lock enabled");
     } catch (_error) {
+      setWakeLockEnabled(false);
       pushDiagnostic("Wake lock unavailable on this device");
     }
+  }
+
+  async function releaseWakeLock() {
+    if (!wakeLockRef.current) {
+      return;
+    }
+
+    await wakeLockRef.current.release().catch(() => {});
+    wakeLockRef.current = null;
+    setWakeLockEnabled(false);
+    pushDiagnostic("Screen wake lock released");
   }
 
   function syncMediaSession(nextStatus) {
@@ -160,7 +174,7 @@ export default function LiveSessionPage() {
           setStatus("Live");
           updateAwaitingGesture(false);
           setSessionNote(
-            "Connected. Installed mode is best for screen-off playback, but some mobile browsers may still pause live audio in the background."
+            "Connected. Some phones still pause live browser audio in the background, so Keep Screen Awake gives the most reliable listening."
           );
           syncMediaSession("playing");
           pushDiagnostic("Playback started successfully");
@@ -319,8 +333,7 @@ export default function LiveSessionPage() {
       }
 
       if (wakeLockRef.current) {
-        wakeLockRef.current.release().catch(() => {});
-        wakeLockRef.current = null;
+        releaseWakeLock().catch(() => {});
       }
 
       if (isNativeAndroidApp()) {
@@ -375,6 +388,19 @@ export default function LiveSessionPage() {
     navigate(`/join/${roomId}`);
   }
 
+  async function handleWakeLockToggle() {
+    if (wakeLockRef.current) {
+      await releaseWakeLock();
+      setSessionNote("Keep Screen Awake was turned off. Some phones may pause live audio when the screen goes dark.");
+      return;
+    }
+
+    await requestWakeLock();
+    if (wakeLockRef.current) {
+      setSessionNote("Keep Screen Awake is on. This is the most reliable way to keep live audio running on mobile web.");
+    }
+  }
+
   return (
     <AppShell
       lockNavigation={!isLeaving && status !== "Session ended" && status !== "Unavailable"}
@@ -413,6 +439,13 @@ export default function LiveSessionPage() {
             onClick={handleLeaveRoom}
           >
             Leave Session
+          </button>
+          <button
+            type="button"
+            className="button-secondary large-button"
+            onClick={handleWakeLockToggle}
+          >
+            {wakeLockEnabled ? "Keep Screen Awake: On" : "Keep Screen Awake"}
           </button>
           <label className="volume-stack" htmlFor="volume">
             Volume
