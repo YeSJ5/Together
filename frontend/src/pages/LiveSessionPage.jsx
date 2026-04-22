@@ -27,6 +27,7 @@ export default function LiveSessionPage() {
   const wakeLockRef = useRef(null);
   const connectedRef = useRef(false);
   const awaitingGestureRef = useRef(false);
+  const hiddenRef = useRef(false);
   const [status, setStatus] = useState("Connecting");
   const [error, setError] = useState("");
   const [volume, setVolume] = useState(100);
@@ -56,6 +57,20 @@ export default function LiveSessionPage() {
   function updateAwaitingGesture(nextAwaitingGesture) {
     awaitingGestureRef.current = nextAwaitingGesture;
     setAwaitingGesture(nextAwaitingGesture);
+  }
+
+  async function attemptPlaybackResume(reason) {
+    if (!audioRef.current?.srcObject || awaitingGestureRef.current) {
+      return;
+    }
+
+    try {
+      await audioRef.current.play();
+      syncMediaSession("playing");
+      pushDiagnostic(`Playback confirmed: ${reason}`);
+    } catch (_error) {
+      pushDiagnostic(`Playback resume blocked: ${reason}`);
+    }
   }
 
   async function requestWakeLock() {
@@ -219,7 +234,8 @@ export default function LiveSessionPage() {
           }
         }
 
-        pollingRef.current = setTimeout(pollEvents, 1200);
+        const nextPollDelay = connectedRef.current ? (hiddenRef.current ? 10000 : 5000) : 1200;
+        pollingRef.current = setTimeout(pollEvents, nextPollDelay);
       } catch (pollError) {
         if (String(pollError.message || "").includes("Session not found")) {
           updateConnected(false);
@@ -239,7 +255,8 @@ export default function LiveSessionPage() {
           setError("");
           setSessionNote("Audio is live. Connection checks are retrying quietly in the background.");
         }
-        pollingRef.current = setTimeout(pollEvents, 1800);
+        const retryDelay = connectedRef.current ? (hiddenRef.current ? 12000 : 6000) : 1800;
+        pollingRef.current = setTimeout(pollEvents, retryDelay);
       }
     }
 
@@ -263,18 +280,31 @@ export default function LiveSessionPage() {
     });
 
     function handleVisibilityChange() {
+      hiddenRef.current = document.visibilityState !== "visible";
+
+      if (document.visibilityState === "hidden") {
+        syncMediaSession("playing");
+        attemptPlaybackResume("app moved to background");
+        return;
+      }
+
       if (document.visibilityState === "visible") {
         requestWakeLock();
-        if (audioRef.current?.srcObject && awaitingGestureRef.current === false) {
-          audioRef.current.play().catch(() => {});
-        }
+        attemptPlaybackResume("app returned to foreground");
       }
     }
 
+    function handlePageShow() {
+      requestWakeLock();
+      attemptPlaybackResume("page restored");
+    }
+
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pageshow", handlePageShow);
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pageshow", handlePageShow);
 
       if (pollingRef.current) {
         clearTimeout(pollingRef.current);
@@ -360,7 +390,18 @@ export default function LiveSessionPage() {
 
         {error ? <p className="error-banner">{error}</p> : null}
 
-        <audio ref={audioRef} autoPlay playsInline controls className="debug-audio-player" />
+        <audio
+          ref={audioRef}
+          autoPlay
+          playsInline
+          controls
+          className="debug-audio-player"
+          onPause={() => {
+            if (connectedRef.current && !awaitingGestureRef.current && hiddenRef.current) {
+              attemptPlaybackResume("audio paused in background");
+            }
+          }}
+        />
 
         <div className="player-card">
           <button type="button" className="button-primary large-button" onClick={handleManualPlay}>
