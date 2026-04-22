@@ -56,6 +56,31 @@ export async function leaveSession(roomId, payload) {
   return handleResponse(response);
 }
 
+export function leaveSessionInBackground(roomId, payload) {
+  const url = `${API_BASE_URL}/session/${roomId}/leave`;
+  const body = JSON.stringify(payload);
+
+  if (navigator.sendBeacon) {
+    const blob = new Blob([body], {
+      type: "application/json"
+    });
+
+    if (navigator.sendBeacon(url, blob)) {
+      return;
+    }
+  }
+
+  fetch(url, {
+    method: "POST",
+    cache: "no-store",
+    keepalive: true,
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body
+  }).catch(() => {});
+}
+
 export async function sendSessionEvent(roomId, payload) {
   const response = await fetch(`${API_BASE_URL}/session/${roomId}/events`, {
     method: "POST",

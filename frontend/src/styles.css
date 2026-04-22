@@ -74,6 +74,43 @@ button {
   padding: 32px 18px 48px;
 }
 
+.topbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 18px;
+}
+
+.brand-link {
+  color: #132238;
+  font-weight: 800;
+  letter-spacing: -0.04em;
+  text-decoration: none;
+  font-size: 1.4rem;
+}
+
+.topbar-copy {
+  margin: 2px 0 0;
+  color: #66788f;
+  font-size: 0.95rem;
+}
+
+.nav-lock-pill {
+  display: inline-flex;
+  align-items: center;
+  min-height: 44px;
+  padding: 0 16px;
+  border-radius: 999px;
+  background: rgba(255, 242, 214, 0.95);
+  color: #8b5d00;
+  font-weight: 600;
+}
+
+.topbar-home {
+  min-width: 110px;
+}
+
 .install-banner {
   display: grid;
   grid-template-columns: 1.4fr 0.9fr;
@@ -413,6 +450,34 @@ button {
   margin-bottom: 16px;
 }
 
+.join-actions-stack {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+}
+
+.scanner-card {
+  display: grid;
+  gap: 12px;
+  margin-bottom: 16px;
+  padding: 16px;
+  border-radius: 18px;
+  background: rgba(247, 250, 255, 0.92);
+  border: 1px solid rgba(90, 123, 160, 0.12);
+}
+
+.scanner-video {
+  width: 100%;
+  border-radius: 18px;
+  background: #132238;
+  aspect-ratio: 3 / 4;
+  object-fit: cover;
+}
+
+.scanner-canvas {
+  display: none;
+}
+
 .player-card {
   display: grid;
   gap: 18px;
@@ -445,6 +510,25 @@ button {
 .diagnostic-line {
   margin: 8px 0 0;
   font-size: 0.94rem;
+}
+
+.activity-feed {
+  margin-top: 18px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(90, 123, 160, 0.12);
+}
+
+.section-kicker {
+  margin: 0 0 10px;
+  color: #66788f;
+  font-size: 0.9rem;
+  font-weight: 600;
+}
+
+.activity-line {
+  margin: 8px 0 0;
+  color: #334963;
+  font-size: 0.95rem;
 }
 
 .error-banner {
@@ -523,7 +607,9 @@ button {
     width: 100%;
   }
 
+  .topbar,
   .section-header {
     flex-direction: column;
+    align-items: stretch;
   }
 }

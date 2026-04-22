@@ -5,6 +5,7 @@ import StatusBadge from "../components/StatusBadge";
 import {
   fetchSessionEvents,
   joinSession,
+  leaveSessionInBackground,
   leaveSession,
   sendSessionEvent
 } from "../lib/api";
@@ -14,6 +15,7 @@ import {
   isNativeAndroidApp
 } from "../lib/nativeAudio";
 import { clearListenerSession, getListenerSession } from "../lib/storage";
+import { useNavigationLock } from "../lib/useNavigationLock";
 import { createPeerConnection } from "../lib/webrtc";
 
 export default function LiveSessionPage() {
@@ -33,6 +35,12 @@ export default function LiveSessionPage() {
   const [showDiagnostics, setShowDiagnostics] = useState(false);
   const [sessionNote, setSessionNote] = useState(
     "Stay on this page until the stream starts. Installing the app gives the best chance of keeping audio alive when your phone screen dims."
+  );
+  const [isLeaving, setIsLeaving] = useState(false);
+
+  useNavigationLock(
+    !isLeaving && status !== "Session ended" && status !== "Unavailable",
+    "Leave the current listening session before navigating away."
   );
 
   function pushDiagnostic(message) {
@@ -245,10 +253,18 @@ export default function LiveSessionPage() {
       }
     }
 
+    function handlePageHide() {
+      leaveSessionInBackground(roomId, {
+        listenerId: listener.listenerId
+      });
+    }
+
     document.addEventListener("visibilitychange", handleVisibilityChange);
+    window.addEventListener("pagehide", handlePageHide);
 
     return () => {
       document.removeEventListener("visibilitychange", handleVisibilityChange);
+      window.removeEventListener("pagehide", handlePageHide);
 
       if (pollingRef.current) {
         clearTimeout(pollingRef.current);
@@ -303,8 +319,26 @@ export default function LiveSessionPage() {
     }
   }
 
+  async function handleLeaveRoom() {
+    const listener = getListenerSession();
+
+    setIsLeaving(true);
+
+    if (listener?.roomId === roomId) {
+      await leaveSession(roomId, {
+        listenerId: listener.listenerId
+      }).catch(() => {});
+    }
+
+    clearListenerSession();
+    navigate(`/join/${roomId}`);
+  }
+
   return (
-    <AppShell>
+    <AppShell
+      lockNavigation={!isLeaving && status !== "Session ended" && status !== "Unavailable"}
+      lockLabel="Leave the room before navigating"
+    >
       <section className="center-card fade-in">
         <StatusBadge tone={connected ? "success" : "warning"}>{status}</StatusBadge>
         <h1>Live Session</h1>
@@ -320,6 +354,13 @@ export default function LiveSessionPage() {
         <div className="player-card">
           <button type="button" className="button-primary large-button" onClick={handleManualPlay}>
             {awaitingGesture ? "Tap To Enable Audio" : "Play Audio"}
+          </button>
+          <button
+            type="button"
+            className="button-secondary large-button"
+            onClick={handleLeaveRoom}
+          >
+            Leave Session
           </button>
           <label className="volume-stack" htmlFor="volume">
             Volume

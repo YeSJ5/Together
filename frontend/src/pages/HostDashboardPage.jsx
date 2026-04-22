@@ -12,6 +12,7 @@ import {
 import { createAppId } from "../lib/ids";
 import { getNativeAudioCapabilities, isNativeAndroidApp, startNativeSystemAudioBridge } from "../lib/nativeAudio";
 import { clearHostSession, saveHostSession } from "../lib/storage";
+import { useNavigationLock } from "../lib/useNavigationLock";
 import { captureHostAudio, createPeerConnection } from "../lib/webrtc";
 
 function makeHostId() {
@@ -42,6 +43,7 @@ export default function HostDashboardPage() {
   const [publicJoinOrigin, setPublicJoinOrigin] = useState(window.location.origin);
   const [showHostDetails, setShowHostDetails] = useState(false);
   const [copiedState, setCopiedState] = useState("");
+  const [recentActivity, setRecentActivity] = useState([]);
   const [nativeCapabilities, setNativeCapabilities] = useState({
     nativeAndroid: false,
     systemAudioCapture: false
@@ -71,6 +73,11 @@ export default function HostDashboardPage() {
 
   const canUseDeviceAudio =
     nativeCapabilities.systemAudioCapture || Boolean(navigator.mediaDevices?.getDisplayMedia);
+
+  useNavigationLock(
+    Boolean(session),
+    "End the current session before leaving this page."
+  );
 
   useEffect(() => {
     fetch("/api/runtime")
@@ -112,6 +119,9 @@ export default function HostDashboardPage() {
     async function processEvent(event) {
       if (event.type === "listener-joined-room") {
         const listenerId = event.payload.listenerId;
+        const displayName = event.payload.username || "Listener";
+
+        pushActivity(`${displayName} joined the room`);
 
         if (!streamRef.current || !roomIdRef.current) {
           return;
@@ -173,7 +183,12 @@ export default function HostDashboardPage() {
       }
 
       if (event.type === "listener-disconnected") {
+        const disconnectedUser = connectedUsers.find(
+          (user) => user.id === event.payload.listenerId
+        );
         const peerConnection = peerConnectionsRef.current.get(event.payload.listenerId);
+
+        pushActivity(`${disconnectedUser?.username || "A listener"} left the room`);
 
         if (peerConnection) {
           peerConnection.close();
@@ -299,6 +314,11 @@ export default function HostDashboardPage() {
     setConnectedUsers([]);
     setAudioDebug("No active capture");
     setHostSignalDebug("Signaling idle");
+    setRecentActivity([]);
+  }
+
+  function pushActivity(message) {
+    setRecentActivity((current) => [message, ...current].slice(0, 5));
   }
 
   async function createFileStream(file) {
@@ -538,7 +558,10 @@ export default function HostDashboardPage() {
   }
 
   return (
-    <AppShell>
+    <AppShell
+      lockNavigation={Boolean(session)}
+      lockLabel="Finish or end the live session first"
+    >
       <section className="dashboard-grid">
         <article className="content-card large-card fade-in">
           <div className="section-header">
@@ -701,9 +724,21 @@ export default function HostDashboardPage() {
                 <div key={user.id} className="listener-pill">
                   {user.username}
                 </div>
-              ))
-            )}
-          </div>
+                ))
+              )}
+            </div>
+            <div className="activity-feed">
+              <p className="section-kicker">Recent activity</p>
+              {recentActivity.length === 0 ? (
+                <p className="empty-state">Join and leave updates will appear here.</p>
+              ) : (
+                recentActivity.map((item, index) => (
+                  <p key={`${item}-${index}`} className="activity-line">
+                    {item}
+                  </p>
+                ))
+              )}
+            </div>
         </article>
       </section>
     </AppShell>
