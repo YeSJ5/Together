@@ -12,6 +12,7 @@ export default function HomePage() {
             Share live device audio from one host laptop or browser to nearby
             phones in seconds. Create a session, show the QR, and let listeners
             join synchronized low-latency audio on the same Wi-Fi or hotspot.
+            Phones can also host in microphone mode for instant voice sharing.
           </p>
           <div className="hero-actions">
             <Link to="/host" className="button-primary">
@@ -24,12 +25,12 @@ export default function HomePage() {
         </div>
         <div className="hero-panel">
           <div className="metric-card">
-            <span>Primary mode</span>
-            <strong>Device Audio</strong>
+            <span>Host modes</span>
+            <strong>Laptop Audio, Phone Mic, Audio File</strong>
           </div>
           <div className="metric-card">
-            <span>Realtime transport</span>
-            <strong>WebRTC + Socket.IO</strong>
+            <span>Experience</span>
+            <strong>Low-latency live listening</strong>
           </div>
           <div className="metric-card">
             <span>Best environment</span>

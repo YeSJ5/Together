@@ -169,6 +169,62 @@ Wi-Fi or hotspot can join directly.
 - Replace the in-memory session store with Redis or MongoDB for production persistence
 - `render.yaml` is included for a basic Render web service setup
 
+## Android App Layer
+
+TOGETHER now includes a native Android wrapper built with Capacitor in:
+
+```text
+frontend/android
+```
+
+This gives the project an installable Android app path instead of relying only
+on a mobile browser tab. It is the recommended path when you want stronger
+mobile behavior for playback and hosting.
+
+### What the Android app improves
+
+- installable app experience instead of a normal browser tab
+- better resilience when switching apps or dimming the screen
+- direct phone hosting in `Microphone` mode
+- direct phone hosting in `Audio File` mode
+- native Android background playback service for listener mode
+- native Android system-audio capture path for host mode on supported devices
+
+### Important limitation
+
+- Android app/system audio capture works only on supported Android versions and
+  only for audio sources that allow playback capture
+- some protected apps may still block capture at the OS level
+- this project now includes the native plugin path for that behavior inside the
+  Android wrapper
+
+### Android commands
+
+From the project root:
+
+```bash
+npm run android:build
+npm run android:open
+```
+
+What they do:
+
+- `android:build` builds the frontend and syncs it into the Android app
+- `android:open` opens the generated Android project in Android Studio
+
+### Build the APK
+
+1. Install Android Studio
+2. Run:
+
+```bash
+npm run android:build
+npm run android:open
+```
+
+3. In Android Studio, let Gradle sync
+4. Use `Run` for a device/emulator, or `Build > Build APK(s)` for a test APK
+
 ## Public Deployment Setup
 
 ### Deploy backend on Render

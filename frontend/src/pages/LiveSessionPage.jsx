@@ -8,6 +8,11 @@ import {
   leaveSession,
   sendSessionEvent
 } from "../lib/api";
+import {
+  disableNativeBackgroundPlayback,
+  enableNativeBackgroundPlayback,
+  isNativeAndroidApp
+} from "../lib/nativeAudio";
 import { clearListenerSession, getListenerSession } from "../lib/storage";
 import { createPeerConnection } from "../lib/webrtc";
 
@@ -18,15 +23,60 @@ export default function LiveSessionPage() {
   const peerConnectionRef = useRef(null);
   const pollingRef = useRef(null);
   const latestEventIdRef = useRef(0);
+  const wakeLockRef = useRef(null);
   const [status, setStatus] = useState("Connecting");
   const [error, setError] = useState("");
   const [volume, setVolume] = useState(100);
   const [connected, setConnected] = useState(false);
   const [diagnostics, setDiagnostics] = useState(["Opening listener session"]);
   const [awaitingGesture, setAwaitingGesture] = useState(false);
+  const [showDiagnostics, setShowDiagnostics] = useState(false);
+  const [sessionNote, setSessionNote] = useState(
+    "Stay on this page until the stream starts. Installing the app gives the best chance of keeping audio alive when your phone screen dims."
+  );
 
   function pushDiagnostic(message) {
-    setDiagnostics((current) => [...current, message].slice(-6));
+    setDiagnostics((current) => [...current, message].slice(-10));
+  }
+
+  async function requestWakeLock() {
+    if (!("wakeLock" in navigator) || wakeLockRef.current) {
+      return;
+    }
+
+    try {
+      wakeLockRef.current = await navigator.wakeLock.request("screen");
+      pushDiagnostic("Screen wake lock enabled");
+    } catch (_error) {
+      pushDiagnostic("Wake lock unavailable on this device");
+    }
+  }
+
+  function syncMediaSession(nextStatus) {
+    if (!("mediaSession" in navigator)) {
+      return;
+    }
+
+    if ("MediaMetadata" in window) {
+      navigator.mediaSession.metadata = new MediaMetadata({
+        title: "TOGETHER Live Audio",
+        artist: `Room ${roomId}`,
+        album: "Listen Together. Instantly."
+      });
+    }
+
+    navigator.mediaSession.playbackState = nextStatus === "playing" ? "playing" : "paused";
+
+    try {
+      navigator.mediaSession.setActionHandler("play", () => {
+        handleManualPlay();
+      });
+      navigator.mediaSession.setActionHandler("pause", () => {
+        audioRef.current?.pause();
+      });
+    } catch (_error) {
+      pushDiagnostic("Media controls unavailable");
+    }
   }
 
   useEffect(() => {
@@ -42,7 +92,11 @@ export default function LiveSessionPage() {
       return undefined;
     }
 
-    pushDiagnostic("Polling listener created");
+    requestWakeLock();
+    if (isNativeAndroidApp()) {
+      enableNativeBackgroundPlayback().catch(() => {});
+    }
+    pushDiagnostic("Listener ready");
 
     const peerConnection = createPeerConnection({
       onIceCandidate: (candidate) => {
@@ -62,17 +116,24 @@ export default function LiveSessionPage() {
 
         audioRef.current.srcObject = stream;
         pushDiagnostic("Audio track received on listener");
-        setStatus("Audio received");
+        setStatus("Ready to play");
+        setSessionNote("The host audio reached your device. If playback does not start, tap the play button once.");
 
         try {
           await audioRef.current.play();
           setConnected(true);
           setStatus("Live");
           setAwaitingGesture(false);
+          setSessionNote(
+            "Connected. Installed mode is best for screen-off playback, but some mobile browsers may still pause live audio in the background."
+          );
+          syncMediaSession("playing");
           pushDiagnostic("Playback started successfully");
         } catch (_playbackError) {
           setStatus("Tap play to start audio");
           setAwaitingGesture(true);
+          setSessionNote("Your phone wants a tap before live audio can start. Tap the button once to continue.");
+          syncMediaSession("paused");
           pushDiagnostic("Playback blocked until user taps play");
         }
       }
@@ -83,12 +144,17 @@ export default function LiveSessionPage() {
       const nextState = peerConnection.connectionState;
       pushDiagnostic(`Peer connection: ${nextState}`);
 
-      if (nextState === "connected") {
-        setConnected(true);
-      }
+        if (nextState === "connected") {
+          setConnected(true);
+          setStatus("Connected");
+          setSessionNote(
+            "Connected to the host. Waiting for the audio stream to begin."
+          );
+        }
 
       if (nextState === "failed") {
         setError("Peer connection failed on this device. Try rejoining the session.");
+        setSessionNote("The connection could not be completed on this device.");
       }
     };
 
@@ -113,6 +179,7 @@ export default function LiveSessionPage() {
             const answer = await peerConnection.createAnswer();
             await peerConnection.setLocalDescription(answer);
             setStatus("Negotiating audio");
+            setSessionNote("Securely connecting your device to the host stream.");
             pushDiagnostic("Answer created and sent");
 
             await sendSessionEvent(roomId, {
@@ -137,6 +204,7 @@ export default function LiveSessionPage() {
           setConnected(false);
           setStatus("Session ended");
           setError("The host session is no longer available.");
+          setSessionNote("This room is no longer active.");
           clearListenerSession();
           return;
         }
@@ -144,13 +212,15 @@ export default function LiveSessionPage() {
         setStatus("Network issue");
         pushDiagnostic(`Polling error: ${pollError.message}`);
         setError("Phone could not connect to the live signaling server. Retry the session.");
+        setSessionNote("The app is trying to reconnect to the host.");
         pollingRef.current = setTimeout(pollEvents, 1800);
       }
     }
 
     async function startListener() {
       setStatus("Joining room");
-      pushDiagnostic("Joining room by polling");
+      setSessionNote("Joining the host room and waiting for the live audio stream.");
+      pushDiagnostic("Joining room");
       await joinSession(roomId, {
         listenerId: listener.listenerId,
         username: listener.username
@@ -162,10 +232,24 @@ export default function LiveSessionPage() {
     startListener().catch((joinError) => {
       setError(joinError.message || "Unable to join the session.");
       setStatus("Unavailable");
+      setSessionNote("This device could not join the room.");
       pushDiagnostic(`Join failed: ${joinError.message}`);
     });
 
+    function handleVisibilityChange() {
+      if (document.visibilityState === "visible") {
+        requestWakeLock();
+        if (audioRef.current?.srcObject && awaitingGesture === false) {
+          audioRef.current.play().catch(() => {});
+        }
+      }
+    }
+
+    document.addEventListener("visibilitychange", handleVisibilityChange);
+
     return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityChange);
+
       if (pollingRef.current) {
         clearTimeout(pollingRef.current);
       }
@@ -177,8 +261,17 @@ export default function LiveSessionPage() {
       if (peerConnectionRef.current) {
         peerConnectionRef.current.close();
       }
+
+      if (wakeLockRef.current) {
+        wakeLockRef.current.release().catch(() => {});
+        wakeLockRef.current = null;
+      }
+
+      if (isNativeAndroidApp()) {
+        disableNativeBackgroundPlayback().catch(() => {});
+      }
     };
-  }, [navigate, roomId]);
+  }, [awaitingGesture, navigate, roomId]);
 
   function handleVolumeChange(event) {
     const nextVolume = Number(event.target.value);
@@ -199,9 +292,13 @@ export default function LiveSessionPage() {
       setConnected(true);
       setStatus("Live");
       setAwaitingGesture(false);
+      setSessionNote("Connected. Your device is now playing the host audio.");
+      syncMediaSession("playing");
       pushDiagnostic("Manual play succeeded");
     } catch (_playError) {
       setError("Audio playback is blocked. Please allow media playback in your browser.");
+      setSessionNote("Your browser is still blocking live audio playback.");
+      syncMediaSession("paused");
       pushDiagnostic("Manual play failed");
     }
   }
@@ -212,9 +309,9 @@ export default function LiveSessionPage() {
         <StatusBadge tone={connected ? "success" : "warning"}>{status}</StatusBadge>
         <h1>Live Session</h1>
         <p className="hero-text compact">
-          Room <strong>{roomId}</strong> is receiving the shared audio stream. For the
-          best experience, keep this page open and use earbuds on mobile.
+          Room <strong>{roomId}</strong> is connected to the shared audio session.
         </p>
+        <p className="subtle-text listener-note">{sessionNote}</p>
 
         {error ? <p className="error-banner">{error}</p> : null}
 
@@ -235,14 +332,23 @@ export default function LiveSessionPage() {
               onChange={handleVolumeChange}
             />
           </label>
-          <div className="diagnostic-card">
-            <strong>Listener diagnostics</strong>
-            {diagnostics.map((item, index) => (
-              <p key={`${item}-${index}`} className="diagnostic-line">
-                {item}
-              </p>
-            ))}
-          </div>
+          <button
+            type="button"
+            className="button-secondary diagnostics-toggle"
+            onClick={() => setShowDiagnostics((current) => !current)}
+          >
+            {showDiagnostics ? "Hide Tech Details" : "Stats for Nerds"}
+          </button>
+          {showDiagnostics ? (
+            <div className="diagnostic-card">
+              <strong>Connection details</strong>
+              {diagnostics.map((item, index) => (
+                <p key={`${item}-${index}`} className="diagnostic-line">
+                  {item}
+                </p>
+              ))}
+            </div>
+          ) : null}
         </div>
       </section>
     </AppShell>

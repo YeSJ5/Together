@@ -102,7 +102,9 @@ export default function ListenerJoinPage() {
                     Source:{" "}
                     {room?.audioSourceMode === "microphone"
                       ? "Microphone"
-                      : "Device Audio"}
+                      : room?.audioSourceMode === "audio-file"
+                        ? "Audio File"
+                        : "Device Audio"}
                   </span>
                   <span>Listeners online: {room?.users?.length || 0}</span>
                 </div>

@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">TOGETHER</string>
+    <string name="title_activity_main">TOGETHER</string>
+    <string name="package_name">com.together.audio</string>
+    <string name="custom_url_scheme">com.together.audio</string>
+</resources>

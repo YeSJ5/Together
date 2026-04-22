@@ -1,9 +1,14 @@
 function inferLocalBackendBaseUrl() {
   if (typeof window === "undefined") {
-    return "http://localhost:5000";
+    return "https://together-1-2zi8.onrender.com";
   }
 
   const { protocol, hostname } = window.location;
+
+  if (protocol === "capacitor:" || protocol === "file:") {
+    return "https://together-1-2zi8.onrender.com";
+  }
+
   const resolvedProtocol = protocol === "https:" ? "https:" : "http:";
   return `${resolvedProtocol}//${hostname}:5000`;
 }

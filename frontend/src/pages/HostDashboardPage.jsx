@@ -10,6 +10,7 @@ import {
   sendSessionEvent
 } from "../lib/api";
 import { createAppId } from "../lib/ids";
+import { getNativeAudioCapabilities, isNativeAndroidApp, startNativeSystemAudioBridge } from "../lib/nativeAudio";
 import { clearHostSession, saveHostSession } from "../lib/storage";
 import { captureHostAudio, createPeerConnection } from "../lib/webrtc";
 
@@ -30,6 +31,7 @@ export default function HostDashboardPage() {
   const [audioSourceMode, setAudioSourceMode] = useState(
     isMobileHost ? "microphone" : "device-audio"
   );
+  const [selectedAudioFile, setSelectedAudioFile] = useState(null);
   const [session, setSession] = useState(null);
   const [connectedUsers, setConnectedUsers] = useState([]);
   const [error, setError] = useState("");
@@ -38,11 +40,20 @@ export default function HostDashboardPage() {
   const [audioDebug, setAudioDebug] = useState("No active capture");
   const [hostSignalDebug, setHostSignalDebug] = useState("Signaling idle");
   const [publicJoinOrigin, setPublicJoinOrigin] = useState(window.location.origin);
+  const [showHostDetails, setShowHostDetails] = useState(false);
+  const [copiedState, setCopiedState] = useState("");
+  const [nativeCapabilities, setNativeCapabilities] = useState({
+    nativeAndroid: false,
+    systemAudioCapture: false
+  });
   const streamRef = useRef(null);
   const captureStreamRef = useRef(null);
+  const nativeCaptureRef = useRef(null);
   const audioContextRef = useRef(null);
   const audioAnalyserRef = useRef(null);
   const audioMeterFrameRef = useRef(null);
+  const fileAudioElementRef = useRef(null);
+  const fileAudioUrlRef = useRef(null);
   const hostIdRef = useRef(makeHostId());
   const roomIdRef = useRef("");
   const peerConnectionsRef = useRef(new Map());
@@ -58,7 +69,8 @@ export default function HostDashboardPage() {
     return `${publicJoinOrigin}/join/${session.roomId}`;
   }, [session]);
 
-  const canUseDeviceAudio = Boolean(navigator.mediaDevices?.getDisplayMedia);
+  const canUseDeviceAudio =
+    nativeCapabilities.systemAudioCapture || Boolean(navigator.mediaDevices?.getDisplayMedia);
 
   useEffect(() => {
     fetch("/api/runtime")
@@ -74,6 +86,16 @@ export default function HostDashboardPage() {
       .catch(() => {
         setPublicJoinOrigin(window.location.origin);
       });
+
+    getNativeAudioCapabilities()
+      .then((capabilities) => {
+        setNativeCapabilities(capabilities);
+
+        if (isMobileHost && capabilities.systemAudioCapture) {
+          setAudioSourceMode("device-audio");
+        }
+      })
+      .catch(() => {});
 
     return () => {
       teardownLocalSession();
@@ -244,6 +266,22 @@ export default function HostDashboardPage() {
       audioAnalyserRef.current = null;
     }
 
+    if (nativeCaptureRef.current) {
+      nativeCaptureRef.current.stop().catch(() => {});
+      nativeCaptureRef.current = null;
+    }
+
+    if (fileAudioElementRef.current) {
+      fileAudioElementRef.current.pause();
+      fileAudioElementRef.current.src = "";
+      fileAudioElementRef.current = null;
+    }
+
+    if (fileAudioUrlRef.current) {
+      URL.revokeObjectURL(fileAudioUrlRef.current);
+      fileAudioUrlRef.current = null;
+    }
+
     if (eventPollRef.current) {
       clearTimeout(eventPollRef.current);
       eventPollRef.current = null;
@@ -261,6 +299,67 @@ export default function HostDashboardPage() {
     setConnectedUsers([]);
     setAudioDebug("No active capture");
     setHostSignalDebug("Signaling idle");
+  }
+
+  async function createFileStream(file) {
+    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
+
+    if (!AudioContextClass) {
+      throw new Error("This browser cannot stream a local audio file as a live source.");
+    }
+
+    if (fileAudioUrlRef.current) {
+      URL.revokeObjectURL(fileAudioUrlRef.current);
+      fileAudioUrlRef.current = null;
+    }
+
+    const objectUrl = URL.createObjectURL(file);
+    fileAudioUrlRef.current = objectUrl;
+
+    const audio = new Audio();
+    audio.src = objectUrl;
+    audio.preload = "auto";
+    audio.controls = false;
+    audio.playsInline = true;
+    audio.loop = false;
+
+    await new Promise((resolve, reject) => {
+      const handleReady = () => {
+        audio.removeEventListener("loadedmetadata", handleReady);
+        audio.removeEventListener("error", handleError);
+        resolve();
+      };
+
+      const handleError = () => {
+        audio.removeEventListener("loadedmetadata", handleReady);
+        audio.removeEventListener("error", handleError);
+        reject(new Error("The selected file could not be opened for streaming."));
+      };
+
+      audio.addEventListener("loadedmetadata", handleReady);
+      audio.addEventListener("error", handleError);
+    });
+
+    const audioContext = new AudioContextClass();
+    await audioContext.resume();
+    const source = audioContext.createMediaElementSource(audio);
+    const destination = audioContext.createMediaStreamDestination();
+    source.connect(destination);
+    source.connect(audioContext.destination);
+
+    fileAudioElementRef.current = audio;
+    captureStreamRef.current = destination.stream;
+    await audio.play();
+
+    audio.addEventListener("ended", () => {
+      setStatus("Source finished");
+      setAudioDebug("The hosted audio file has finished playing");
+    });
+
+    return {
+      captureStream: destination.stream,
+      playbackContext: audioContext
+    };
   }
 
   function startAudioDiagnostics(mediaStream) {
@@ -323,9 +422,15 @@ export default function HostDashboardPage() {
       }
 
       if (isMobileHost && audioSourceMode === "device-audio") {
-        throw new Error(
-          "Use Microphone mode when hosting from a phone. Mobile browsers do not reliably support device or tab audio sharing."
-        );
+        if (!nativeCapabilities.systemAudioCapture) {
+          throw new Error(
+            "Phone browsers do not reliably support device or tab audio sharing here. Install the Android app for native device audio, or use Microphone or Audio File mode."
+          );
+        }
+      }
+
+      if (audioSourceMode === "audio-file" && !selectedAudioFile) {
+        throw new Error("Choose an audio file before starting the session.");
       }
 
       createdSession = await createSession({
@@ -333,8 +438,22 @@ export default function HostDashboardPage() {
         audioSourceMode
       });
 
-      const mediaStream = await captureHostAudio(audioSourceMode);
-      captureStreamRef.current = mediaStream;
+      let mediaStream;
+
+      if (audioSourceMode === "device-audio" && nativeCapabilities.systemAudioCapture) {
+        const nativeCapture = await startNativeSystemAudioBridge();
+        nativeCaptureRef.current = nativeCapture;
+        mediaStream = nativeCapture.stream;
+        captureStreamRef.current = mediaStream;
+      } else if (audioSourceMode === "audio-file") {
+        const fileSource = await createFileStream(selectedAudioFile);
+        mediaStream = fileSource.captureStream;
+        audioContextRef.current = fileSource.playbackContext;
+      } else {
+        mediaStream = await captureHostAudio(audioSourceMode);
+        captureStreamRef.current = mediaStream;
+      }
+
       const audioTracks = mediaStream.getAudioTracks();
 
       if (audioTracks.length === 0) {
@@ -389,6 +508,35 @@ export default function HostDashboardPage() {
     }
   }
 
+  async function handleCopyJoinLink() {
+    if (!joinUrl) {
+      return;
+    }
+
+    try {
+      await navigator.clipboard.writeText(joinUrl);
+      setCopiedState("Link copied");
+    } catch (_error) {
+      setCopiedState("Copy failed");
+    }
+  }
+
+  async function handleShareJoinLink() {
+    if (!joinUrl || !navigator.share) {
+      return;
+    }
+
+    try {
+      await navigator.share({
+        title: "Join my TOGETHER session",
+        text: `Listen together in room ${session?.roomId}`,
+        url: joinUrl
+      });
+    } catch (_error) {
+      // Ignore share cancellations.
+    }
+  }
+
   return (
     <AppShell>
       <section className="dashboard-grid">
@@ -417,6 +565,13 @@ export default function HostDashboardPage() {
             >
               Microphone
             </button>
+            <button
+              type="button"
+              className={audioSourceMode === "audio-file" ? "chip active" : "chip"}
+              onClick={() => setAudioSourceMode("audio-file")}
+            >
+              Audio File
+            </button>
           </div>
 
           <p className="subtle-text">
@@ -424,10 +579,39 @@ export default function HostDashboardPage() {
             browser may still show a picker internally, but the app UI stays focused
             on audio sharing.
           </p>
+          {audioSourceMode === "audio-file" ? (
+            <div className="file-host-panel">
+              <label className="file-picker" htmlFor="audio-file-input">
+                Choose audio file
+              </label>
+              <input
+                id="audio-file-input"
+                className="file-input"
+                type="file"
+                accept="audio/*"
+                onChange={(event) => {
+                  setSelectedAudioFile(event.target.files?.[0] || null);
+                }}
+              />
+              <p className="subtle-text">
+                Best mobile fallback: pick a song, lecture clip, or podcast file from
+                your phone and TOGETHER will stream it live to listeners.
+              </p>
+              <p className="subtle-text">
+                {selectedAudioFile
+                  ? `Selected file: ${selectedAudioFile.name}`
+                  : "No audio file selected yet."}
+              </p>
+            </div>
+          ) : null}
           {isMobileHost ? (
             <p className="subtle-text">
-              Hosting from a phone works best in <strong>Microphone</strong> mode.
-              Mobile browsers usually cannot share device audio output reliably.
+              Hosting from a phone works best in <strong>Microphone</strong> or
+              <strong> Audio File</strong> mode. Start the room on your phone and
+              nearby devices can join exactly the same way with the QR code.
+              {nativeCapabilities.systemAudioCapture
+                ? " Native mobile capture is available on supported Android setups."
+                : " Mobile browsers still do not reliably support full device audio output sharing."}
             </p>
           ) : null}
 
@@ -464,6 +648,21 @@ export default function HostDashboardPage() {
                 <strong>Room ID:</strong> {session.roomId}
               </p>
               <p className="join-url">{joinUrl}</p>
+              <div className="button-row compact-row">
+                <button type="button" className="button-secondary" onClick={handleCopyJoinLink}>
+                  Copy Link
+                </button>
+                {navigator.share ? (
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={handleShareJoinLink}
+                  >
+                    Share
+                  </button>
+                ) : null}
+              </div>
+              {copiedState ? <p className="subtle-text">{copiedState}</p> : null}
             </div>
           ) : (
             <p className="empty-state">
@@ -475,8 +674,25 @@ export default function HostDashboardPage() {
         <article className="content-card slide-up">
           <h2>Connected listeners</h2>
           <p className="listener-count">{connectedUsers.length}</p>
-          <p className="subtle-text">{audioDebug}</p>
-          <p className="subtle-text">{hostSignalDebug}</p>
+          <p className="subtle-text">
+            {connectedUsers.length === 0
+              ? "Share the QR or link to bring listeners into the room."
+              : "Listeners are connected and ready for the live stream."}
+          </p>
+          <button
+            type="button"
+            className="button-secondary diagnostics-toggle"
+            onClick={() => setShowHostDetails((current) => !current)}
+          >
+            {showHostDetails ? "Hide Session Details" : "Session Details"}
+          </button>
+          {showHostDetails ? (
+            <div className="diagnostic-card">
+              <strong>Host details</strong>
+              <p className="diagnostic-line">{audioDebug}</p>
+              <p className="diagnostic-line">{hostSignalDebug}</p>
+            </div>
+          ) : null}
           <div className="listener-list">
             {connectedUsers.length === 0 ? (
               <p className="empty-state">No listeners yet.</p>
