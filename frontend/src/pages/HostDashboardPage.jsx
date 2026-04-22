@@ -11,6 +11,7 @@ import {
 } from "../lib/api";
 import { createAppId } from "../lib/ids";
 import { getNativeAudioCapabilities, isNativeAndroidApp, startNativeSystemAudioBridge } from "../lib/nativeAudio";
+import { sanitizeChatMessage, sanitizeDisplayName } from "../lib/sanitize";
 import { clearHostSession, saveHostSession } from "../lib/storage";
 import { useNavigationLock } from "../lib/useNavigationLock";
 import { captureHostAudio, createPeerConnection } from "../lib/webrtc";
@@ -29,6 +30,7 @@ function detectMobileHost() {
 
 export default function HostDashboardPage() {
   const isMobileHost = detectMobileHost();
+  const [hostName, setHostName] = useState("Host");
   const [audioSourceMode, setAudioSourceMode] = useState(
     isMobileHost ? "microphone" : "device-audio"
   );
@@ -44,6 +46,8 @@ export default function HostDashboardPage() {
   const [showHostDetails, setShowHostDetails] = useState(false);
   const [copiedState, setCopiedState] = useState("");
   const [recentActivity, setRecentActivity] = useState([]);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatInput, setChatInput] = useState("");
   const [nativeCapabilities, setNativeCapabilities] = useState({
     nativeAndroid: false,
     systemAudioCapture: false
@@ -70,6 +74,24 @@ export default function HostDashboardPage() {
 
     return `${publicJoinOrigin}/join/${session.roomId}`;
   }, [session]);
+
+  const participantList = useMemo(() => {
+    if (!session) {
+      return [];
+    }
+
+    return [
+      {
+        id: session.hostId,
+        username: session.hostName || hostName || "Host",
+        role: "Host"
+      },
+      ...connectedUsers.map((user) => ({
+        ...user,
+        role: "Listener"
+      }))
+    ];
+  }, [connectedUsers, hostName, session]);
 
   const canUseDeviceAudio =
     nativeCapabilities.systemAudioCapture || Boolean(navigator.mediaDevices?.getDisplayMedia);
@@ -195,6 +217,15 @@ export default function HostDashboardPage() {
           peerConnectionsRef.current.delete(event.payload.listenerId);
         }
       }
+
+      if (event.type === "chat-message") {
+        pushChatMessage({
+          id: `${event.id}-${event.senderId}`,
+          senderName: event.payload.username || "Participant",
+          audience: event.targetId ? "Host only" : "Everyone",
+          message: event.payload.message
+        });
+      }
     }
 
     async function pollEvents() {
@@ -315,10 +346,15 @@ export default function HostDashboardPage() {
     setAudioDebug("No active capture");
     setHostSignalDebug("Signaling idle");
     setRecentActivity([]);
+    setChatMessages([]);
   }
 
   function pushActivity(message) {
     setRecentActivity((current) => [message, ...current].slice(0, 5));
+  }
+
+  function pushChatMessage(message) {
+    setChatMessages((current) => [...current, message].slice(-20));
   }
 
   async function createFileStream(file) {
@@ -455,6 +491,7 @@ export default function HostDashboardPage() {
 
       createdSession = await createSession({
         hostId: hostIdRef.current,
+        hostName: sanitizeDisplayName(hostName, "Host"),
         audioSourceMode
       });
 
@@ -557,6 +594,39 @@ export default function HostDashboardPage() {
     }
   }
 
+  async function handleSendChat() {
+    if (!session) {
+      return;
+    }
+
+    const message = sanitizeChatMessage(chatInput);
+
+    if (!message) {
+      return;
+    }
+
+    try {
+      await sendSessionEvent(session.roomId, {
+        type: "chat-message",
+        senderId: hostIdRef.current,
+        payload: {
+          username: sanitizeDisplayName(session.hostName || hostName, "Host"),
+          message
+        }
+      });
+
+      pushChatMessage({
+        id: `local-${Date.now()}`,
+        senderName: sanitizeDisplayName(session.hostName || hostName, "Host"),
+        audience: "Everyone",
+        message
+      });
+      setChatInput("");
+    } catch (_error) {
+      setError("Message could not be sent.");
+    }
+  }
+
   return (
     <AppShell
       lockNavigation={Boolean(session)}
@@ -597,10 +667,17 @@ export default function HostDashboardPage() {
             </button>
           </div>
 
+          <input
+            className="text-input"
+            placeholder="Host name"
+            value={hostName}
+            maxLength={32}
+            onChange={(event) => setHostName(sanitizeDisplayName(event.target.value, ""))}
+            disabled={Boolean(session)}
+          />
+
           <p className="subtle-text">
-            Device Audio uses browser-supported system or tab audio capture. The
-            browser may still show a picker internally, but the app UI stays focused
-            on audio sharing.
+            Start a room, share audio clearly, and keep everyone in sync without extra noise on the screen.
           </p>
           {audioSourceMode === "audio-file" ? (
             <div className="file-host-panel">
@@ -695,7 +772,7 @@ export default function HostDashboardPage() {
         </article>
 
         <article className="content-card slide-up">
-          <h2>Connected listeners</h2>
+          <h2>Room</h2>
           <p className="listener-count">{connectedUsers.length}</p>
           <p className="subtle-text">
             {connectedUsers.length === 0
@@ -717,12 +794,13 @@ export default function HostDashboardPage() {
             </div>
           ) : null}
           <div className="listener-list">
-            {connectedUsers.length === 0 ? (
-              <p className="empty-state">No listeners yet.</p>
+            {participantList.length === 0 ? (
+              <p className="empty-state">No participants yet.</p>
             ) : (
-              connectedUsers.map((user) => (
-                <div key={user.id} className="listener-pill">
-                  {user.username}
+              participantList.map((user) => (
+                <div key={user.id} className="listener-pill participant-pill">
+                  <span>{user.username}</span>
+                  <strong>{user.role}</strong>
                 </div>
                 ))
               )}
@@ -739,6 +817,40 @@ export default function HostDashboardPage() {
                 ))
               )}
             </div>
+        </article>
+
+        <article className="content-card slide-up">
+          <h2>Room chat</h2>
+          <p className="subtle-text">
+            Send quick updates to everyone while the session stays live.
+          </p>
+          <div className="chat-feed">
+            {chatMessages.length === 0 ? (
+              <p className="empty-state">Room messages will appear here.</p>
+            ) : (
+              chatMessages.map((message) => (
+                <div key={message.id} className="chat-bubble">
+                  <div className="chat-meta">
+                    <strong>{message.senderName}</strong>
+                    <span>{message.audience}</span>
+                  </div>
+                  <p>{message.message}</p>
+                </div>
+              ))
+            )}
+          </div>
+          <div className="chat-compose">
+            <input
+              className="text-input"
+              placeholder="Send a message to the room"
+              value={chatInput}
+              maxLength={220}
+              onChange={(event) => setChatInput(event.target.value)}
+            />
+            <button type="button" className="button-primary" onClick={handleSendChat}>
+              Send
+            </button>
+          </div>
         </article>
       </section>
     </AppShell>

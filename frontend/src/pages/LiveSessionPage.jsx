@@ -3,6 +3,7 @@ import { useNavigate, useParams } from "react-router-dom";
 import AppShell from "../components/AppShell";
 import StatusBadge from "../components/StatusBadge";
 import {
+  fetchSession,
   fetchSessionEvents,
   joinSession,
   leaveSession,
@@ -13,6 +14,7 @@ import {
   enableNativeBackgroundPlayback,
   isNativeAndroidApp
 } from "../lib/nativeAudio";
+import { sanitizeChatMessage } from "../lib/sanitize";
 import { clearListenerSession, getListenerSession } from "../lib/storage";
 import { useNavigationLock } from "../lib/useNavigationLock";
 import { createPeerConnection } from "../lib/webrtc";
@@ -23,6 +25,7 @@ export default function LiveSessionPage() {
   const audioRef = useRef(null);
   const peerConnectionRef = useRef(null);
   const pollingRef = useRef(null);
+  const roomPollRef = useRef(null);
   const latestEventIdRef = useRef(0);
   const wakeLockRef = useRef(null);
   const connectedRef = useRef(false);
@@ -35,7 +38,10 @@ export default function LiveSessionPage() {
   const [diagnostics, setDiagnostics] = useState(["Opening listener session"]);
   const [awaitingGesture, setAwaitingGesture] = useState(false);
   const [showDiagnostics, setShowDiagnostics] = useState(false);
-  const [wakeLockEnabled, setWakeLockEnabled] = useState(false);
+  const [roomSnapshot, setRoomSnapshot] = useState(null);
+  const [chatMessages, setChatMessages] = useState([]);
+  const [chatInput, setChatInput] = useState("");
+  const [chatAudience, setChatAudience] = useState("everyone");
   const [sessionNote, setSessionNote] = useState(
     "Stay on this page until the stream starts. On many phones, live browser audio is most reliable while the app stays visible."
   );
@@ -60,6 +66,10 @@ export default function LiveSessionPage() {
     setAwaitingGesture(nextAwaitingGesture);
   }
 
+  function pushChatMessage(message) {
+    setChatMessages((current) => [...current, message].slice(-20));
+  }
+
   async function attemptPlaybackResume(reason) {
     if (!audioRef.current?.srcObject || awaitingGestureRef.current) {
       return;
@@ -81,10 +91,8 @@ export default function LiveSessionPage() {
 
     try {
       wakeLockRef.current = await navigator.wakeLock.request("screen");
-      setWakeLockEnabled(true);
       pushDiagnostic("Screen wake lock enabled");
     } catch (_error) {
-      setWakeLockEnabled(false);
       pushDiagnostic("Wake lock unavailable on this device");
     }
   }
@@ -96,7 +104,6 @@ export default function LiveSessionPage() {
 
     await wakeLockRef.current.release().catch(() => {});
     wakeLockRef.current = null;
-    setWakeLockEnabled(false);
     pushDiagnostic("Screen wake lock released");
   }
 
@@ -174,7 +181,7 @@ export default function LiveSessionPage() {
           setStatus("Live");
           updateAwaitingGesture(false);
           setSessionNote(
-            "Connected. Some phones still pause live browser audio in the background, so Keep Screen Awake gives the most reliable listening."
+            "Connected. If playback pauses after app switching, return to this page and tap play once."
           );
           syncMediaSession("playing");
           pushDiagnostic("Playback started successfully");
@@ -246,6 +253,15 @@ export default function LiveSessionPage() {
             await peerConnection.addIceCandidate(event.payload.candidate);
             pushDiagnostic("ICE candidate added");
           }
+
+          if (event.type === "chat-message") {
+            pushChatMessage({
+              id: `${event.id}-${event.senderId}`,
+              senderName: event.payload.username || "Participant",
+              audience: event.targetId ? "Host only" : "Everyone",
+              message: event.payload.message
+            });
+          }
         }
 
         const nextPollDelay = connectedRef.current ? (hiddenRef.current ? 10000 : 5000) : 1200;
@@ -278,6 +294,8 @@ export default function LiveSessionPage() {
       setStatus("Joining room");
       setSessionNote("Joining the host room and waiting for the live audio stream.");
       pushDiagnostic("Joining room");
+      const initialRoom = await fetchSession(roomId);
+      setRoomSnapshot(initialRoom);
       await joinSession(roomId, {
         listenerId: listener.listenerId,
         username: listener.username
@@ -292,6 +310,23 @@ export default function LiveSessionPage() {
       setSessionNote("This device could not join the room.");
       pushDiagnostic(`Join failed: ${joinError.message}`);
     });
+
+    async function pollRoomState() {
+      try {
+        const latestRoom = await fetchSession(roomId);
+        if (!isCancelled) {
+          setRoomSnapshot(latestRoom);
+        }
+      } catch (_error) {
+        // Session polling is best-effort here.
+      } finally {
+        if (!isCancelled) {
+          roomPollRef.current = window.setTimeout(pollRoomState, 3000);
+        }
+      }
+    }
+
+    pollRoomState();
 
     function handleVisibilityChange() {
       hiddenRef.current = document.visibilityState !== "visible";
@@ -322,6 +357,10 @@ export default function LiveSessionPage() {
 
       if (pollingRef.current) {
         clearTimeout(pollingRef.current);
+      }
+
+      if (roomPollRef.current) {
+        clearTimeout(roomPollRef.current);
       }
 
       leaveSession(roomId, {
@@ -388,18 +427,56 @@ export default function LiveSessionPage() {
     navigate(`/join/${roomId}`);
   }
 
-  async function handleWakeLockToggle() {
-    if (wakeLockRef.current) {
-      await releaseWakeLock();
-      setSessionNote("Keep Screen Awake was turned off. Some phones may pause live audio when the screen goes dark.");
+  async function handleSendChat() {
+    const listener = getListenerSession();
+
+    if (!listener) {
       return;
     }
 
-    await requestWakeLock();
-    if (wakeLockRef.current) {
-      setSessionNote("Keep Screen Awake is on. This is the most reliable way to keep live audio running on mobile web.");
+    const message = sanitizeChatMessage(chatInput);
+
+    if (!message) {
+      return;
+    }
+    const targetId = chatAudience === "host" ? roomSnapshot?.hostId || listener.hostId : null;
+
+    try {
+      await sendSessionEvent(roomId, {
+        type: "chat-message",
+        senderId: listener.listenerId,
+        targetId,
+        payload: {
+          username: listener.username || "Guest Listener",
+          message
+        }
+      });
+
+      pushChatMessage({
+        id: `local-${Date.now()}`,
+        senderName: listener.username || "Guest Listener",
+        audience: targetId ? "Host only" : "Everyone",
+        message
+      });
+      setChatInput("");
+    } catch (_error) {
+      setError("Message could not be sent.");
     }
   }
+
+  const participantList = roomSnapshot
+    ? [
+        {
+          id: roomSnapshot.hostId,
+          username: roomSnapshot.hostName || "Host",
+          role: "Host"
+        },
+        ...(roomSnapshot.users || []).map((user) => ({
+          ...user,
+          role: "Listener"
+        }))
+      ]
+    : [];
 
   return (
     <AppShell
@@ -440,13 +517,6 @@ export default function LiveSessionPage() {
           >
             Leave Session
           </button>
-          <button
-            type="button"
-            className="button-secondary large-button"
-            onClick={handleWakeLockToggle}
-          >
-            {wakeLockEnabled ? "Keep Screen Awake: On" : "Keep Screen Awake"}
-          </button>
           <label className="volume-stack" htmlFor="volume">
             Volume
             <input
@@ -475,6 +545,61 @@ export default function LiveSessionPage() {
               ))}
             </div>
           ) : null}
+
+          <div className="participant-section">
+            <strong>People in this room</strong>
+            <div className="listener-list">
+              {participantList.length === 0 ? (
+                <p className="empty-state">Room members will appear here.</p>
+              ) : (
+                participantList.map((user) => (
+                  <div key={user.id} className="listener-pill participant-pill">
+                    <span>{user.username}</span>
+                    <strong>{user.role}</strong>
+                  </div>
+                ))
+              )}
+            </div>
+          </div>
+
+          <div className="participant-section">
+            <strong>Room chat</strong>
+            <div className="chat-feed">
+              {chatMessages.length === 0 ? (
+                <p className="empty-state">Messages shared in this room will appear here.</p>
+              ) : (
+                chatMessages.map((message) => (
+                  <div key={message.id} className="chat-bubble">
+                    <div className="chat-meta">
+                      <strong>{message.senderName}</strong>
+                      <span>{message.audience}</span>
+                    </div>
+                    <p>{message.message}</p>
+                  </div>
+                ))
+              )}
+            </div>
+            <div className="chat-compose">
+              <select
+                className="text-input chat-select"
+                value={chatAudience}
+                onChange={(event) => setChatAudience(event.target.value)}
+              >
+                <option value="everyone">Message everyone</option>
+                <option value="host">Message host only</option>
+              </select>
+              <input
+                className="text-input"
+                placeholder="Send a message"
+                value={chatInput}
+                maxLength={220}
+                onChange={(event) => setChatInput(event.target.value)}
+              />
+              <button type="button" className="button-primary" onClick={handleSendChat}>
+                Send
+              </button>
+            </div>
+          </div>
         </div>
       </section>
     </AppShell>

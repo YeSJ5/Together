@@ -98,7 +98,7 @@ app.get("/api/runtime", (request, response) => {
 });
 
 app.post("/create-session", (request, response) => {
-  const { hostId, audioSourceMode } = request.body || {};
+  const { hostId, hostName, audioSourceMode } = request.body || {};
 
   if (!hostId) {
     return response.status(400).json({
@@ -106,7 +106,7 @@ app.post("/create-session", (request, response) => {
     });
   }
 
-  const session = createSession({ hostId, audioSourceMode });
+  const session = createSession({ hostId, hostName, audioSourceMode });
   return response.status(201).json(session);
 });
 

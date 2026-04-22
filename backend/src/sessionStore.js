@@ -29,6 +29,7 @@ function sanitizeSession(session) {
   return {
     roomId: session.roomId,
     hostId: session.hostId,
+    hostName: session.hostName,
     users: session.users,
     createdAt: session.createdAt,
     status: session.status,
@@ -36,11 +37,12 @@ function sanitizeSession(session) {
   };
 }
 
-function createSession({ hostId, audioSourceMode = "device-audio" }) {
+function createSession({ hostId, hostName = "Host", audioSourceMode = "device-audio" }) {
   const roomId = generateUniqueRoomId();
   const session = {
     roomId,
     hostId,
+    hostName,
     users: [],
     createdAt: Date.now(),
     status: "active",

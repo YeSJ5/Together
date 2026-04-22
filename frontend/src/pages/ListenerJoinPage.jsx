@@ -5,6 +5,7 @@ import AppShell from "../components/AppShell";
 import StatusBadge from "../components/StatusBadge";
 import { fetchSession } from "../lib/api";
 import { createAppId } from "../lib/ids";
+import { normalizeRoomId, sanitizeDisplayName } from "../lib/sanitize";
 import { getListenerSession, saveListenerSession } from "../lib/storage";
 
 export default function ListenerJoinPage() {
@@ -239,7 +240,7 @@ export default function ListenerJoinPage() {
 
   function handleJoin() {
     if (!roomId) {
-      const nextRoomId = manualRoomId.trim().toUpperCase();
+      const nextRoomId = normalizeRoomId(manualRoomId);
 
       if (!nextRoomId) {
         setError("Enter a valid room ID or scan the QR code.");
@@ -259,7 +260,7 @@ export default function ListenerJoinPage() {
       saveListenerSession({
         roomId,
         listenerId,
-        username: username.trim() || savedListener?.username || "Guest Listener",
+        username: sanitizeDisplayName(username || savedListener?.username, "Guest Listener"),
         hostId: room?.hostId || ""
       });
 
@@ -301,7 +302,8 @@ export default function ListenerJoinPage() {
                   className="text-input"
                   placeholder="Your name (optional)"
                   value={username}
-                  onChange={(event) => setUsername(event.target.value)}
+                  maxLength={32}
+                  onChange={(event) => setUsername(sanitizeDisplayName(event.target.value, ""))}
                 />
                 <button
                   type="button"
@@ -366,7 +368,8 @@ export default function ListenerJoinPage() {
                   className="text-input"
                   placeholder="Enter room ID"
                   value={manualRoomId}
-                  onChange={(event) => setManualRoomId(event.target.value)}
+                  maxLength={16}
+                  onChange={(event) => setManualRoomId(normalizeRoomId(event.target.value))}
                 />
                 <button
                   type="button"

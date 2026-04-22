@@ -431,6 +431,20 @@ button {
   color: #28415f;
 }
 
+.participant-pill {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.participant-pill strong {
+  color: #66788f;
+  font-size: 0.8rem;
+  text-transform: uppercase;
+  letter-spacing: 0.06em;
+}
+
 .center-card {
   max-width: 620px;
   margin: 4rem auto 0;
@@ -488,6 +502,11 @@ button {
   margin-top: 20px;
 }
 
+.participant-section {
+  display: grid;
+  gap: 12px;
+}
+
 .debug-audio-player {
   width: 100%;
   margin-top: 16px;
@@ -514,6 +533,43 @@ button {
 .diagnostic-line {
   margin: 8px 0 0;
   font-size: 0.94rem;
+}
+
+.chat-feed {
+  display: grid;
+  gap: 10px;
+  max-height: 260px;
+  overflow-y: auto;
+}
+
+.chat-bubble {
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(241, 246, 255, 0.92);
+  border: 1px solid rgba(90, 123, 160, 0.12);
+}
+
+.chat-bubble p {
+  margin: 8px 0 0;
+  color: #334963;
+}
+
+.chat-meta {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: #66788f;
+  font-size: 0.85rem;
+}
+
+.chat-compose {
+  display: grid;
+  gap: 12px;
+}
+
+.chat-select {
+  margin-bottom: 0;
 }
 
 .activity-feed {
