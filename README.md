@@ -1,42 +1,167 @@
 # TOGETHER
 
-TOGETHER is a QR-based real-time multi-user audio streaming system built for nearby group listening. One host device shares live device audio, listeners scan a QR code, and each listener receives the stream through WebRTC with Socket.IO signaling.
+TOGETHER is a final-year major project for QR-based real-time multi-user audio streaming. A host starts a room, shares live audio, and nearby listeners join instantly by scanning a QR code. The project is designed for classrooms, seminars, hostels, group study, and shared listening scenarios where low-friction audio access matters more than full video conferencing.
 
-[![Deploy to Render](https://render.com/images/deploy-to-render-button.svg)](https://render.com/deploy?repo=https://github.com/YeSJ5/Together)
+The current production flow is centered on:
 
-## Product Goal
+- a Vercel deployment for the TOGETHER frontend
+- Render for the backend API and signaling support
+- WebRTC for audio delivery
+- Express for session APIs
+- Vite + React for the client app
 
-- Host plays audio from laptop, browser tab, video player, or music app
-- Host creates a session and shows a QR code
-- Listeners scan the QR and join instantly on mobile or desktop
-- Audio is optimized for same Wi-Fi or hotspot classroom-style usage
+## Problem Statement
 
-## MVP Features
+When one person wants to share live audio with a small nearby group, the usual options are inconvenient:
 
-- React + Vite frontend with responsive premium UI
-- Node.js + Express backend on port `5000`
-- Socket.IO session presence and WebRTC signaling
-- Host dashboard with room creation, QR code, join URL, and live listener count
-- Device audio capture using `getDisplayMedia({ audio: true })`
-- Optional microphone mode fallback
-- Listener join validation and live playback page
-- Session end, invalid room, disconnected host, unsupported browser, and playback error states
-- In-memory session store for fast MVP setup
+- passing around a device or speaker reduces clarity
+- Bluetooth sharing does not scale well for multiple listeners
+- live streaming platforms add too much setup and latency
+- QR joining is often missing from lightweight real-time tools
 
-## Architecture
+TOGETHER solves this by letting one host create a room and distribute a scan-to-join audio session in a few seconds.
+
+## Project Objective
+
+Build a clean, production-style full-stack system where:
+
+- a host starts a live session
+- the app generates a room ID and QR code
+- listeners join on phone or laptop
+- host audio is streamed in real time
+- the room shows live participant presence
+- the group can exchange quick text messages during the session
+
+## Core Features
+
+### Live audio sharing
+
+- Device audio sharing on supported desktop browsers using browser media capture
+- Microphone sharing as a fallback mode
+- Audio file hosting mode for mobile-friendly fallback sharing
+- WebRTC-based low-latency audio streaming
+
+### QR-based joining
+
+- Automatic room creation
+- Join URL generation
+- QR code rendering on the host dashboard
+- Listener join page with:
+  - direct room validation
+  - camera QR scan
+  - QR-from-image fallback
+  - manual room entry fallback
+
+### Live room management
+
+- real-time listener count
+- participant list with host and listeners
+- room activity feed for joins and leaves
+- session end handling
+- invalid/expired room handling
+
+### Room communication
+
+- built-in room chat
+- listener can message everyone or host only
+- host can message the full room
+- duplicate local chat echo issue fixed so messages display once
+
+### Mobile and PWA support
+
+- mobile-responsive UI
+- install prompt for supported mobile browsers
+- PWA service worker for quicker re-entry
+- better mobile join flow than plain URL entry
+- background/media-session support where browser capabilities allow it
+
+## Current Working Product Flow
+
+### Host flow
+
+1. Open the host page.
+2. Choose an audio source:
+   - `Device Audio`
+   - `Microphone`
+   - `Audio File`
+3. Start the session.
+4. Share the generated QR code or join link.
+5. Watch participants join in real time.
+6. End the session when finished.
+
+### Listener flow
+
+1. Scan the QR code or open the join link.
+2. Validate the room on the join page.
+3. Enter a name if needed.
+4. Tap `Join Audio`.
+5. Move into the live listening page.
+6. Control playback volume and use room chat if required.
+
+## Tech Stack
+
+### Frontend
+
+- React
+- Vite
+- React Router
+- custom responsive CSS
+- `react-qr-code`
+- `socket.io-client`
+- `jsqr`
+
+### Backend
+
+- Node.js
+- Express.js
+- Socket.IO
+- CORS
+- in-memory session storage for MVP behavior
+
+### Realtime streaming
+
+- WebRTC for audio stream transport
+- Socket.IO and HTTP polling endpoints for signaling/session coordination
+
+### Mobile wrapper
+
+- Capacitor Android project included
+- native Android layer kept in the repo for future extension
+
+## Folder Structure
 
 ```text
 TOGETHER/
 |-- frontend/
+|   |-- public/
+|   |   |-- manifest.webmanifest
+|   |   |-- sw.js
+|   |   |-- icon-192.svg
+|   |   `-- icon-512.svg
 |   |-- src/
 |   |   |-- components/
+|   |   |   |-- AppShell.jsx
+|   |   |   |-- PwaPrompt.jsx
+|   |   |   `-- StatusBadge.jsx
 |   |   |-- lib/
+|   |   |   |-- api.js
+|   |   |   |-- config.js
+|   |   |   |-- ids.js
+|   |   |   |-- nativeAudio.js
+|   |   |   |-- sanitize.js
+|   |   |   |-- socket.js
+|   |   |   |-- storage.js
+|   |   |   |-- useNavigationLock.js
+|   |   |   `-- webrtc.js
 |   |   |-- pages/
+|   |   |   |-- HomePage.jsx
+|   |   |   |-- HostDashboardPage.jsx
+|   |   |   |-- ListenerJoinPage.jsx
+|   |   |   `-- LiveSessionPage.jsx
 |   |   |-- App.jsx
 |   |   |-- main.jsx
 |   |   `-- styles.css
-|   |-- .env.example
-|   |-- index.html
+|   |-- android/
 |   |-- package.json
 |   `-- vite.config.js
 |-- backend/
@@ -44,33 +169,60 @@ TOGETHER/
 |   |   |-- config.js
 |   |   |-- server.js
 |   |   `-- sessionStore.js
-|   |-- .env.example
 |   `-- package.json
+|-- package.json
+|-- vercel.json
+|-- render.yaml
 `-- README.md
 ```
 
-### Realtime Flow
+## System Architecture
 
-1. Host calls `POST /create-session`
-2. Backend creates an in-memory room with a unique room ID
-3. Frontend renders the join URL and QR code
-4. Listener opens `/join/:roomId`, validates room, then enters `/listen/:roomId`
-5. Socket.IO events coordinate room presence and WebRTC offer/answer/ICE exchange
-6. Host shares device audio and broadcasts tracks to listeners through peer connections
+```text
+Host Device
+  -> capture audio
+  -> create room
+  -> generate QR/link
+  -> publish WebRTC offer
+
+Listener Device
+  -> scan QR
+  -> validate room
+  -> join room
+  -> receive WebRTC stream
+
+Backend
+  -> create/manage session records
+  -> store listener presence in memory
+  -> relay signaling events
+  -> expose session APIs
+```
 
 ## API Endpoints
+
+### Session endpoints
 
 - `POST /create-session`
 - `GET /session/:id`
 - `DELETE /session/:id`
-- `GET /api/health`
+- `POST /session/:id/join`
+- `POST /session/:id/leave`
+- `POST /session/:id/events`
+- `GET /session/:id/events`
 
-Example session shape:
+### Health/runtime endpoints
+
+- `GET /api`
+- `GET /api/health`
+- `GET /api/runtime`
+
+### Example session object
 
 ```json
 {
   "roomId": "ROOM-AX27",
   "hostId": "host123",
+  "hostName": "Host",
   "users": [],
   "createdAt": 1710000000000,
   "status": "active",
@@ -78,7 +230,7 @@ Example session shape:
 }
 ```
 
-## Socket Events
+## Realtime Events Used
 
 - `host-created-room`
 - `listener-joined-room`
@@ -88,203 +240,237 @@ Example session shape:
 - `signal:offer`
 - `signal:answer`
 - `signal:ice-candidate`
+- `chat-message`
 
-## Setup
+## Supported Audio Modes
 
-### 1. Install dependencies
+### 1. Device Audio
+
+Best for desktop Chrome/Edge when the host wants to share:
+
+- YouTube tab audio
+- browser video audio
+- browser-based learning content
+- system/tab audio where the browser permits it
+
+### 2. Microphone
+
+Best fallback for:
+
+- announcements
+- speaking sessions
+- simple mobile hosting
+
+### 3. Audio File
+
+Best fallback for:
+
+- mobile-hosted demo sessions
+- lectures, podcast clips, music files
+- phones where device output capture is not supported
+
+## Browser and Device Notes
+
+### Best supported host environment
+
+- Google Chrome desktop
+- Microsoft Edge desktop
+
+### Best supported listener environment
+
+- Chrome on Android
+- Chrome/Edge on desktop
+
+### Important limitations
+
+- true device/system output sharing is most reliable on desktop browsers
+- mobile browsers generally do not support full device-output capture consistently
+- autoplay restrictions may require a manual tap on some listener devices
+- full background audio behavior depends on browser and OS media-session behavior
+- in-memory sessions are fine for MVP/demo use, but not ideal for large-scale production persistence
+
+## PWA and Mobile Behavior
+
+The web app includes:
+
+- install prompt support
+- service worker
+- manifest
+- mobile-first join flow
+
+This improves:
+
+- faster reopen after initial use
+- cleaner mobile experience
+- easier listener access on repeated sessions
+
+## Android Layer
+
+The repository also contains an Android wrapper under `frontend/android`.
+
+This was added to explore:
+
+- native installable app behavior
+- better mobile hosting paths
+- deeper background audio handling
+- Android-specific system audio capture experiments
+
+The main working project flow remains the web/PWA deployment, but the Android layer stays in the repository for future extension.
+
+## Local Development
+
+### Install dependencies
+
+From the project root:
 
 ```bash
 npm run setup
 ```
 
-### 2. Configure environment variables
+### Root scripts
 
-Backend `.env`:
+```bash
+npm run build
+npm start
+npm run dev:backend
+npm run dev:frontend
+npm run android:build
+npm run android:sync
+npm run android:open
+```
+
+### Frontend scripts
+
+Inside `frontend/`:
+
+```bash
+npm run dev
+npm run dev:network
+npm run build
+npm run preview
+```
+
+### Backend scripts
+
+Inside `backend/`:
+
+```bash
+npm run dev
+npm start
+```
+
+## Environment Variables
+
+### Backend
 
 ```bash
 PORT=5000
 CLIENT_ORIGIN=*
 ```
 
-Frontend `.env`:
+For public deployment:
+
+```bash
+PORT=5000
+CLIENT_ORIGIN=https://your-frontend.vercel.app
+```
+
+### Frontend
 
 ```bash
 VITE_API_BASE_URL=http://localhost:5000
 VITE_SOCKET_URL=http://localhost:5000
 VITE_SOCKET_PATH=/socket.io
-VITE_PUBLIC_APP_URL=https://together-puce.vercel.app
+VITE_PUBLIC_APP_URL=https://your-frontend.vercel.app
 ```
 
-### 3. Run locally
+## Local Demo Instructions
 
-Build the frontend once:
+Recommended for evaluation/demo:
 
-```bash
-npm run build
-```
+1. Build the frontend.
+2. Start the backend from the root using `npm start`.
+3. Open `http://localhost:5000` on the host laptop.
+4. Start a session.
+5. Let the QR code expose the laptop’s LAN address.
+6. Join from listener phones/laptops on the same Wi-Fi or hotspot.
 
-Start the unified host server:
+## Production Deployment
 
-```bash
-npm start
-```
+## Frontend deployment
 
-Open `http://localhost:5000` on the host laptop. The app will automatically
-generate a QR code using the laptop's LAN IP so nearby phones on the same
-Wi-Fi or hotspot can join directly.
+- platform: Vercel
+- canonical public frontend: your TOGETHER Vercel deployment
 
-### LAN demo mode
-
-- Host opens `http://localhost:5000`
-- QR code resolves to `http://YOUR-LAPTOP-IP:5000/join/...`
-- Listener joins from any phone or laptop on the same Wi-Fi or hotspot
-- This is the recommended demo setup for classrooms, seminars, and project evaluation
-
-## Browser Support
-
-- Best host support: latest Google Chrome or Microsoft Edge
-- Best listener support: latest Chrome on Android, Chrome desktop, Edge desktop
-- Safari may have stricter autoplay and device audio capture limitations
-
-## How QR Join Works
-
-- Host creates a session
-- Frontend generates a join URL like `http://localhost:5173/join/ROOM-AX27`
-- QR code is rendered from that URL
-- Listener scans the QR and lands directly on the room join page
-
-## Deployment Notes
-
-### Frontend
-
-- Deploy on Vercel or Netlify
-- Set `VITE_API_BASE_URL` and `VITE_SOCKET_URL` to the deployed backend URL
-- Set `VITE_PUBLIC_APP_URL` to the deployed frontend URL so generated QR codes use the public address
-- `frontend/vercel.json` already includes SPA route rewrites for React Router
-
-### Backend
-
-- Deploy on Render or Railway
-- Set `PORT` from the platform and set `CLIENT_ORIGIN` to the deployed frontend URL
-- Replace the in-memory session store with Redis or MongoDB for production persistence
-- `render.yaml` is included for a basic Render web service setup
-
-## Android App Layer
-
-TOGETHER now includes a native Android wrapper built with Capacitor in:
-
-```text
-frontend/android
-```
-
-This gives the project an installable Android app path instead of relying only
-on a mobile browser tab. It is the recommended path when you want stronger
-mobile behavior for playback and hosting.
-
-### What the Android app improves
-
-- installable app experience instead of a normal browser tab
-- better resilience when switching apps or dimming the screen
-- direct phone hosting in `Microphone` mode
-- direct phone hosting in `Audio File` mode
-- native Android background playback service for listener mode
-- native Android system-audio capture path for host mode on supported devices
-
-### Important limitation
-
-- Android app/system audio capture works only on supported Android versions and
-  only for audio sources that allow playback capture
-- some protected apps may still block capture at the OS level
-- this project now includes the native plugin path for that behavior inside the
-  Android wrapper
-
-### Android commands
-
-From the project root:
-
-```bash
-npm run android:build
-npm run android:open
-```
-
-What they do:
-
-- `android:build` builds the frontend and syncs it into the Android app
-- `android:open` opens the generated Android project in Android Studio
-
-### Build the APK
-
-1. Install Android Studio
-2. Run:
-
-```bash
-npm run android:build
-npm run android:open
-```
-
-3. In Android Studio, let Gradle sync
-4. Use `Run` for a device/emulator, or `Build > Build APK(s)` for a test APK
-
-## Public Deployment Setup
-
-### Deploy backend on Render
-
-1. Create a new Web Service from this repo on Render.
-2. Set the root directory to `backend`.
-3. Render can also read the included [render.yaml](C:/Users/yeshw/OneDrive/Documents/New%20project/render.yaml).
-4. Add environment variables:
-
-```bash
-PORT=5000
-CLIENT_ORIGIN=https://together-puce.vercel.app
-```
-
-5. After deploy, note the backend URL, for example:
-
-```text
-https://together-backend.onrender.com
-```
-
-The backend is safe to deploy independently. If the frontend bundle is not
-present in the Render service, the root path returns a small backend status
-response instead of failing.
-
-### Deploy frontend on Vercel
-
-1. Import the repo into Vercel.
-2. Set the project root to `frontend`.
-3. Add environment variables:
+### Suggested Vercel env values
 
 ```bash
 VITE_API_BASE_URL=https://your-backend.onrender.com
 VITE_SOCKET_URL=https://your-backend.onrender.com
 VITE_SOCKET_PATH=/socket.io
-VITE_PUBLIC_APP_URL=https://together-puce.vercel.app
+VITE_PUBLIC_APP_URL=https://your-frontend.vercel.app
 ```
 
-4. Use `https://together-puce.vercel.app` as the canonical frontend URL and update Render `CLIENT_ORIGIN` to that exact URL if needed.
+## Backend deployment
 
-### Preview deployments
+- platform: Render
+- backend serves APIs and signaling/session operations
 
-- If you want Vercel preview deployments to connect too, `CLIENT_ORIGIN` can contain comma-separated frontend origins.
-- Example:
+### Suggested Render env values
 
 ```bash
-CLIENT_ORIGIN=https://together-puce.vercel.app,https://your-frontend-git-main-yourteam.vercel.app
+PORT=5000
+CLIENT_ORIGIN=https://your-frontend.vercel.app
 ```
 
-## Production Considerations
+## Current Product Highlights
 
-- Add TURN servers for better WebRTC reliability across more network types
-- Replace in-memory sessions with Redis or MongoDB
-- Add auth for hosts and moderated listener access
-- Add reconnect-aware session recovery
-- Add analytics, bitrate tuning, and optional recording controls
+- QR-based room join
+- real-time participant awareness
+- live audio hosting and listening
+- mobile join support
+- chat inside active room
+- cleaner host/listener UI
+- duplicate chat render bug fixed
+- TOGETHER kept as the canonical public product name
+
+## Known Limitations
+
+- no permanent database yet
+- sessions are lost if backend restarts
+- TURN infrastructure is not yet added for wider network robustness
+- mobile device-audio hosting is still limited by browser/platform restrictions
+- background audio behavior is browser dependent
 
 ## Future Enhancements
 
-- PWA support for faster mobile re-entry
-- Host controls for mute-all and per-listener diagnostics
-- Session expiry policies and scheduled rooms
-- Better cross-platform system audio capture support
-- Admin dashboard and attendance insights
+- Redis or MongoDB persistence
+- TURN server support
+- authentication and host moderation
+- room scheduling and expiry policies
+- analytics and attendance insights
+- richer mobile-native capabilities
+- push notifications and more advanced background playback support
+- optional recording or archive mode
+
+## Academic Value
+
+This project demonstrates:
+
+- full-stack system design
+- real-time media architecture
+- browser-based media capture
+- WebRTC integration
+- QR-driven UX for nearby-device workflows
+- responsive/PWA interface design
+- deployment architecture across frontend and backend platforms
+
+## Repository
+
+GitHub repository:
+
+[https://github.com/YeSJ5/Together](https://github.com/YeSJ5/Together)
+
+## Canonical Live Frontend
+
+Deploy the frontend under your preferred TOGETHER domain or Vercel URL.
