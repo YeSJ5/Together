@@ -264,7 +264,7 @@ export default function ListenerJoinPage() {
         hostId: room?.hostId || ""
       });
 
-      window.location.assign(`${window.location.origin}/session/${roomId}`);
+      window.location.assign(`${window.location.origin}/listen/${roomId}`);
     } catch (_joinError) {
       setIsJoining(false);
       setStatus("Room ready");

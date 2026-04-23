@@ -11,6 +11,7 @@ export default function App() {
       <Route path="/host" element={<HostDashboardPage />} />
       <Route path="/join" element={<ListenerJoinPage />} />
       <Route path="/join/:roomId" element={<ListenerJoinPage />} />
+      <Route path="/listen/:roomId" element={<LiveSessionPage />} />
       <Route path="/session/:roomId" element={<LiveSessionPage />} />
     </Routes>
   );

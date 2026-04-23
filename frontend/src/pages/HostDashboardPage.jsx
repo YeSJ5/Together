@@ -354,7 +354,13 @@ export default function HostDashboardPage() {
   }
 
   function pushChatMessage(message) {
-    setChatMessages((current) => [...current, message].slice(-20));
+    setChatMessages((current) => {
+      if (current.some((item) => item.id === message.id)) {
+        return current;
+      }
+
+      return [...current, message].slice(-20);
+    });
   }
 
   async function createFileStream(file) {
@@ -615,12 +621,6 @@ export default function HostDashboardPage() {
         }
       });
 
-      pushChatMessage({
-        id: `local-${Date.now()}`,
-        senderName: sanitizeDisplayName(session.hostName || hostName, "Host"),
-        audience: "Everyone",
-        message
-      });
       setChatInput("");
     } catch (_error) {
       setError("Message could not be sent.");
@@ -772,7 +772,7 @@ export default function HostDashboardPage() {
         </article>
 
         <article className="content-card slide-up">
-          <h2>Room</h2>
+          <h2>Participants</h2>
           <p className="listener-count">{connectedUsers.length}</p>
           <p className="subtle-text">
             {connectedUsers.length === 0
@@ -784,7 +784,7 @@ export default function HostDashboardPage() {
             className="button-secondary diagnostics-toggle"
             onClick={() => setShowHostDetails((current) => !current)}
           >
-            {showHostDetails ? "Hide Session Details" : "Session Details"}
+            {showHostDetails ? "Hide Details" : "View Details"}
           </button>
           {showHostDetails ? (
             <div className="diagnostic-card">
@@ -822,7 +822,7 @@ export default function HostDashboardPage() {
         <article className="content-card slide-up">
           <h2>Room chat</h2>
           <p className="subtle-text">
-            Send quick updates to everyone while the session stays live.
+            Keep the room coordinated with quick text updates.
           </p>
           <div className="chat-feed">
             {chatMessages.length === 0 ? (

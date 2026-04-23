@@ -54,7 +54,7 @@ TOGETHER/
 1. Host calls `POST /create-session`
 2. Backend creates an in-memory room with a unique room ID
 3. Frontend renders the join URL and QR code
-4. Listener opens `/join/:roomId`, validates room, then enters `/session/:roomId`
+4. Listener opens `/join/:roomId`, validates room, then enters `/listen/:roomId`
 5. Socket.IO events coordinate room presence and WebRTC offer/answer/ICE exchange
 6. Host shares device audio and broadcasts tracks to listeners through peer connections
 
@@ -112,7 +112,7 @@ Frontend `.env`:
 VITE_API_BASE_URL=http://localhost:5000
 VITE_SOCKET_URL=http://localhost:5000
 VITE_SOCKET_PATH=/socket.io
-VITE_PUBLIC_APP_URL=https://together-listen.vercel.app
+VITE_PUBLIC_APP_URL=https://together-puce.vercel.app
 ```
 
 ### 3. Run locally
@@ -236,7 +236,7 @@ npm run android:open
 
 ```bash
 PORT=5000
-CLIENT_ORIGIN=https://together-listen.vercel.app
+CLIENT_ORIGIN=https://together-puce.vercel.app
 ```
 
 5. After deploy, note the backend URL, for example:
@@ -259,10 +259,10 @@ response instead of failing.
 VITE_API_BASE_URL=https://your-backend.onrender.com
 VITE_SOCKET_URL=https://your-backend.onrender.com
 VITE_SOCKET_PATH=/socket.io
-VITE_PUBLIC_APP_URL=https://together-listen.vercel.app
+VITE_PUBLIC_APP_URL=https://together-puce.vercel.app
 ```
 
-4. Use `https://together-listen.vercel.app` as the canonical frontend URL and update Render `CLIENT_ORIGIN` to that exact URL if needed.
+4. Use `https://together-puce.vercel.app` as the canonical frontend URL and update Render `CLIENT_ORIGIN` to that exact URL if needed.
 
 ### Preview deployments
 
@@ -270,7 +270,7 @@ VITE_PUBLIC_APP_URL=https://together-listen.vercel.app
 - Example:
 
 ```bash
-CLIENT_ORIGIN=https://together-listen.vercel.app,https://your-frontend-git-main-yourteam.vercel.app
+CLIENT_ORIGIN=https://together-puce.vercel.app,https://your-frontend-git-main-yourteam.vercel.app
 ```
 
 ## Production Considerations

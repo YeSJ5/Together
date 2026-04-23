@@ -67,7 +67,13 @@ export default function LiveSessionPage() {
   }
 
   function pushChatMessage(message) {
-    setChatMessages((current) => [...current, message].slice(-20));
+    setChatMessages((current) => {
+      if (current.some((item) => item.id === message.id)) {
+        return current;
+      }
+
+      return [...current, message].slice(-20);
+    });
   }
 
   async function attemptPlaybackResume(reason) {
@@ -152,6 +158,7 @@ export default function LiveSessionPage() {
       enableNativeBackgroundPlayback().catch(() => {});
     }
     pushDiagnostic("Listener ready");
+    let isCancelled = false;
 
     const peerConnection = createPeerConnection({
       onIceCandidate: (candidate) => {
@@ -352,6 +359,7 @@ export default function LiveSessionPage() {
     window.addEventListener("pageshow", handlePageShow);
 
     return () => {
+      isCancelled = true;
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("pageshow", handlePageShow);
 
@@ -452,12 +460,6 @@ export default function LiveSessionPage() {
         }
       });
 
-      pushChatMessage({
-        id: `local-${Date.now()}`,
-        senderName: listener.username || "Guest Listener",
-        audience: targetId ? "Host only" : "Everyone",
-        message
-      });
       setChatInput("");
     } catch (_error) {
       setError("Message could not be sent.");
@@ -485,7 +487,7 @@ export default function LiveSessionPage() {
     >
       <section className="center-card fade-in">
         <StatusBadge tone={connected ? "success" : "warning"}>{status}</StatusBadge>
-        <h1>Live Session</h1>
+        <h1>Listening Live</h1>
         <p className="hero-text compact">
           Room <strong>{roomId}</strong> is connected to the shared audio session.
         </p>
@@ -533,7 +535,7 @@ export default function LiveSessionPage() {
             className="button-secondary diagnostics-toggle"
             onClick={() => setShowDiagnostics((current) => !current)}
           >
-            {showDiagnostics ? "Hide Tech Details" : "Stats for Nerds"}
+            {showDiagnostics ? "Hide Details" : "Connection Details"}
           </button>
           {showDiagnostics ? (
             <div className="diagnostic-card">

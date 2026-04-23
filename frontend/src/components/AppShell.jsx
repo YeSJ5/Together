@@ -1,10 +1,13 @@
-import PwaPrompt from "./PwaPrompt";
 import { Link, useLocation } from "react-router-dom";
+import PwaPrompt from "./PwaPrompt";
 
-export default function AppShell({ children, lockNavigation = false, lockLabel = "Session active" }) {
+export default function AppShell({ children }) {
   const location = useLocation();
   const isHome = location.pathname === "/";
-  const showPwaPrompt = isHome;
+  const shouldShowPwaPrompt =
+    location.pathname === "/" ||
+    location.pathname.startsWith("/join") ||
+    location.pathname.startsWith("/listen");
 
   return (
     <div className="app-frame">
@@ -18,15 +21,13 @@ export default function AppShell({ children, lockNavigation = false, lockLabel =
             </Link>
             <p className="topbar-copy">Listen Together. Instantly.</p>
           </div>
-          {lockNavigation ? (
-            <span className="nav-lock-pill">{lockLabel}</span>
-          ) : !isHome ? (
+          {!isHome ? (
             <Link to="/" className="button-secondary topbar-home">
               Home
             </Link>
           ) : null}
         </header>
-        {showPwaPrompt ? <PwaPrompt /> : null}
+        {shouldShowPwaPrompt ? <PwaPrompt /> : null}
         {children}
       </main>
     </div>

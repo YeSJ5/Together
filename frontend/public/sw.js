@@ -1,4 +1,4 @@
-const APP_CACHE = "together-shell-v1";
+const APP_CACHE = "together-shell-v2";
 const APP_SHELL = ["/", "/manifest.webmanifest", "/icon-192.svg", "/icon-512.svg"];
 
 self.addEventListener("install", (event) => {
@@ -27,7 +27,6 @@ self.addEventListener("fetch", (event) => {
 
   if (
     url.pathname.startsWith("/api") ||
-    url.pathname.startsWith("/session") ||
     url.pathname.startsWith("/create-session") ||
     url.pathname.startsWith("/_/backend")
   ) {
