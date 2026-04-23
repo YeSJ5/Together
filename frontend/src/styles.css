@@ -165,6 +165,94 @@ button {
   padding: 32px;
 }
 
+.home-hero {
+  min-height: 460px;
+  align-items: stretch;
+}
+
+.hero-copy-wide {
+  display: grid;
+  align-content: start;
+  gap: 18px;
+}
+
+.home-hero-panel {
+  display: grid;
+  align-content: stretch;
+}
+
+.hero-mini-grid,
+.spotlight-list,
+.mode-explainer-grid,
+.join-room-summary {
+  display: grid;
+  gap: 14px;
+}
+
+.hero-mini-grid,
+.join-room-summary {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.mini-feature,
+.home-spotlight,
+.mode-explainer,
+.join-mode-card,
+.join-room-card {
+  padding: 18px;
+  border-radius: 20px;
+  background: rgba(247, 250, 255, 0.94);
+  border: 1px solid rgba(90, 123, 160, 0.12);
+}
+
+.mini-feature span,
+.spotlight-row span,
+.mode-explainer p,
+.join-copy {
+  color: #66788f;
+}
+
+.mini-feature strong,
+.spotlight-row strong,
+.mode-explainer strong {
+  display: block;
+  margin-top: 6px;
+  color: #132238;
+}
+
+.spotlight-list {
+  margin-top: 16px;
+}
+
+.spotlight-row {
+  display: grid;
+  gap: 4px;
+  padding: 14px 0;
+  border-top: 1px solid rgba(90, 123, 160, 0.12);
+}
+
+.spotlight-row:first-child {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.mode-explainer-grid {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.mode-explainer {
+  min-height: 160px;
+}
+
+.mode-explainer p {
+  margin: 10px 0 0;
+  font-size: 0.95rem;
+}
+
+.home-grid {
+  margin-top: 22px;
+}
+
 .hero-copy h1,
 .content-card h2,
 .center-card h1 {
@@ -302,6 +390,124 @@ button {
 .workspace-side,
 .workspace-card {
   min-width: 0;
+}
+
+.studio-shell,
+.listener-shell {
+  display: grid;
+  grid-template-columns: 280px minmax(0, 1fr) 340px;
+  gap: 18px;
+  align-items: start;
+}
+
+.listener-shell {
+  grid-template-columns: 280px minmax(0, 1fr);
+}
+
+.studio-sidebar,
+.listener-sidebar {
+  position: sticky;
+  top: 24px;
+  display: grid;
+  gap: 22px;
+  min-height: calc(100vh - 120px);
+}
+
+.studio-brand h2 {
+  margin: 0 0 10px;
+  font-size: 1.6rem;
+  letter-spacing: -0.04em;
+}
+
+.studio-nav {
+  display: grid;
+  gap: 10px;
+}
+
+.studio-nav-button {
+  display: grid;
+  gap: 6px;
+  padding: 16px 18px;
+  text-align: left;
+  border: 1px solid rgba(90, 123, 160, 0.12);
+  border-radius: 18px;
+  background: rgba(247, 250, 255, 0.72);
+  color: #53657b;
+}
+
+.studio-nav-button strong {
+  color: #132238;
+}
+
+.studio-nav-button span {
+  font-size: 0.92rem;
+}
+
+.studio-nav-button.active {
+  background: linear-gradient(155deg, #182c47, #223e63);
+  color: #dce8f7;
+  box-shadow: 0 16px 30px rgba(21, 38, 61, 0.18);
+}
+
+.studio-nav-button.active strong {
+  color: #fff8ef;
+}
+
+.studio-sidebar-footer {
+  margin-top: auto;
+  display: grid;
+  gap: 14px;
+}
+
+.sidebar-actions {
+  margin-top: 0;
+}
+
+.studio-main,
+.listener-main {
+  min-height: calc(100vh - 120px);
+}
+
+.studio-sidepanel {
+  position: sticky;
+  top: 24px;
+}
+
+.compact-section-header {
+  margin-bottom: 16px;
+}
+
+.compact-hero {
+  margin-bottom: 18px;
+}
+
+.content-stage,
+.listener-stage,
+.join-panel {
+  min-height: 420px;
+}
+
+.join-shell {
+  max-width: 860px;
+}
+
+.join-header {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.join-tabs {
+  margin-top: 12px;
+}
+
+.join-mode-card {
+  display: grid;
+  gap: 16px;
+}
+
+.join-room-card {
+  margin-top: 18px;
 }
 
 .workspace-hero {
@@ -764,7 +970,12 @@ button {
   .hero-card,
   .dashboard-grid,
   .workspace-grid,
-  .content-grid {
+  .content-grid,
+  .studio-shell,
+  .listener-shell,
+  .hero-mini-grid,
+  .join-room-summary,
+  .mode-explainer-grid {
     grid-template-columns: 1fr;
   }
 
@@ -778,6 +989,13 @@ button {
 
   .page-shell {
     padding-top: 22px;
+  }
+
+  .studio-sidebar,
+  .listener-sidebar,
+  .studio-sidepanel {
+    position: static;
+    min-height: auto;
   }
 }
 
@@ -798,6 +1016,11 @@ button {
     font-size: 2.3rem;
   }
 
+  .studio-shell,
+  .listener-shell {
+    gap: 14px;
+  }
+
   .app-tabs {
     position: sticky;
     top: 12px;
@@ -814,5 +1037,9 @@ button {
   .section-header {
     flex-direction: column;
     align-items: stretch;
+  }
+
+  .studio-nav-button {
+    padding: 14px 16px;
   }
 }

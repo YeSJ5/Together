@@ -633,17 +633,75 @@ export default function HostDashboardPage() {
       lockNavigation={Boolean(session)}
       lockLabel="Finish or end the live session first"
     >
-      <section className="workspace-grid">
-        <article className="content-card workspace-main fade-in">
-          <div className="section-header">
-            <div>
-              <p className="eyebrow">Host dashboard</p>
-              <h1>Broadcast your live audio</h1>
-            </div>
-            <StatusBadge tone={session ? "success" : "neutral"}>{status}</StatusBadge>
+      <section className="studio-shell fade-in">
+        <aside className="content-card studio-sidebar">
+          <div className="studio-brand">
+            <p className="eyebrow">Host studio</p>
+            <h2>Run the room</h2>
+            <p className="subtle-text">
+              Control the source, track the room, and share access without hunting through the page.
+            </p>
           </div>
 
-          <div className="workspace-hero">
+          <div className="studio-nav" role="tablist" aria-label="Host sections">
+            <button
+              type="button"
+              className={activeTab === "studio" ? "studio-nav-button active" : "studio-nav-button"}
+              onClick={() => setActiveTab("studio")}
+            >
+              <strong>Studio</strong>
+              <span>Source, host identity, and start controls</span>
+            </button>
+            <button
+              type="button"
+              className={activeTab === "people" ? "studio-nav-button active" : "studio-nav-button"}
+              onClick={() => setActiveTab("people")}
+            >
+              <strong>People</strong>
+              <span>Presence, room members, and activity</span>
+            </button>
+            <button
+              type="button"
+              className={activeTab === "chat" ? "studio-nav-button active" : "studio-nav-button"}
+              onClick={() => setActiveTab("chat")}
+            >
+              <strong>Chat</strong>
+              <span>Coordinate with listeners inside the room</span>
+            </button>
+          </div>
+
+          <div className="studio-sidebar-footer">
+            <StatusBadge tone={session ? "success" : "neutral"}>{status}</StatusBadge>
+            <div className="button-row sidebar-actions">
+              <button
+                type="button"
+                className="button-primary"
+                onClick={handleStartSession}
+                disabled={Boolean(session) || isStarting}
+              >
+                {isStarting ? "Starting..." : "Go Live"}
+              </button>
+              <button
+                type="button"
+                className="button-secondary"
+                onClick={handleEndSession}
+                disabled={!session}
+              >
+                End
+              </button>
+            </div>
+          </div>
+        </aside>
+
+        <article className="content-card studio-main">
+          <div className="section-header compact-section-header">
+            <div>
+              <p className="eyebrow">TOGETHER</p>
+              <h1>Broadcast your live audio</h1>
+            </div>
+          </div>
+
+          <div className="workspace-hero compact-hero">
             <div className="workspace-kpis">
               <div className="workspace-stat">
                 <span>Room</span>
@@ -654,7 +712,7 @@ export default function HostDashboardPage() {
                 <strong>{connectedUsers.length}</strong>
               </div>
               <div className="workspace-stat">
-                <span>Mode</span>
+                <span>Source</span>
                 <strong>
                   {audioSourceMode === "device-audio"
                     ? "Device Audio"
@@ -664,54 +722,16 @@ export default function HostDashboardPage() {
                 </strong>
               </div>
             </div>
-            <div className="button-row workspace-actions">
-              <button
-                type="button"
-                className="button-primary"
-                onClick={handleStartSession}
-                disabled={Boolean(session) || isStarting}
-              >
-                {isStarting ? "Starting..." : "Start Sharing Session"}
-              </button>
-              <button
-                type="button"
-                className="button-secondary"
-                onClick={handleEndSession}
-                disabled={!session}
-              >
-                End Session
-              </button>
-            </div>
           </div>
 
           {error ? <p className="error-banner">{error}</p> : null}
 
-          <div className="app-tabs" role="tablist" aria-label="Host sections">
-            <button
-              type="button"
-              className={activeTab === "studio" ? "app-tab active" : "app-tab"}
-              onClick={() => setActiveTab("studio")}
-            >
-              Studio
-            </button>
-            <button
-              type="button"
-              className={activeTab === "people" ? "app-tab active" : "app-tab"}
-              onClick={() => setActiveTab("people")}
-            >
-              People
-            </button>
-            <button
-              type="button"
-              className={activeTab === "chat" ? "app-tab active" : "app-tab"}
-              onClick={() => setActiveTab("chat")}
-            >
-              Chat
-            </button>
-          </div>
-
           {activeTab === "studio" ? (
-            <div className="app-panel">
+            <div className="app-panel content-stage">
+              <div className="panel-heading">
+                <h2>Studio controls</h2>
+                <span className="mini-caption">Pick the clearest source for this session</span>
+              </div>
               <div className="source-toggle">
                 <button
                   type="button"
@@ -746,9 +766,20 @@ export default function HostDashboardPage() {
                 disabled={Boolean(session)}
               />
 
-              <p className="subtle-text">
-                Start a room, share audio clearly, and keep everyone in sync without needing to hunt through the page.
-              </p>
+              <div className="mode-explainer-grid">
+                <div className="mode-explainer">
+                  <strong>Device Audio</strong>
+                  <p>Best for browser tabs, laptop playback, videos, and anything your desktop can share directly.</p>
+                </div>
+                <div className="mode-explainer">
+                  <strong>Microphone</strong>
+                  <p>Best for voice rooms, quick announcements, teaching, and live conversation from any device.</p>
+                </div>
+                <div className="mode-explainer">
+                  <strong>Audio File</strong>
+                  <p>Best for phones or portable hosting when you want a predictable, stable audio source.</p>
+                </div>
+              </div>
 
               {audioSourceMode === "audio-file" ? (
                 <div className="file-host-panel">
@@ -787,7 +818,7 @@ export default function HostDashboardPage() {
           ) : null}
 
           {activeTab === "people" ? (
-            <div className="app-panel">
+            <div className="app-panel content-stage">
               <div className="panel-heading">
                 <h2>Participants</h2>
                 <button
@@ -833,7 +864,7 @@ export default function HostDashboardPage() {
           ) : null}
 
           {activeTab === "chat" ? (
-            <div className="app-panel">
+            <div className="app-panel content-stage">
               <div className="panel-heading">
                 <h2>Room chat</h2>
                 <span className="mini-caption">Quick coordination while the session stays live</span>
@@ -869,10 +900,10 @@ export default function HostDashboardPage() {
           ) : null}
         </article>
 
-        <aside className="content-card workspace-side slide-up">
+        <aside className="content-card studio-sidepanel slide-up">
           <div className="panel-heading">
             <h2>Session access</h2>
-            <span className="mini-caption">Share once, let everyone join fast</span>
+            <span className="mini-caption">Always visible while you host</span>
           </div>
           {session ? (
             <div className="qr-stack qr-stack-center">

@@ -4,61 +4,79 @@ import AppShell from "../components/AppShell";
 export default function HomePage() {
   return (
     <AppShell>
-      <section className="hero-card fade-in">
-        <div className="hero-copy">
+      <section className="hero-card home-hero fade-in">
+        <div className="hero-copy hero-copy-wide">
           <p className="eyebrow">TOGETHER</p>
-          <h1>Listen Together. Instantly.</h1>
+          <h1>A shared audio room that opens in seconds.</h1>
           <p className="hero-text">
-            Share live device audio from one host laptop or browser to nearby
-            phones in seconds. Create a session, show the QR, and let listeners
-            join synchronized low-latency audio on the same Wi-Fi or hotspot.
-            Phones can also host in microphone mode for instant voice sharing.
+            TOGETHER lets one device host a live audio session and everyone else join with a single link or QR scan.
+            It works for classrooms, events, study rooms, collaborative viewing, voice sharing, and group listening on
+            phones or laptops.
           </p>
           <div className="hero-actions">
             <Link to="/host" className="button-primary">
-              Start as Host
+              Open Host Studio
             </Link>
             <Link to="/join" className="button-secondary">
-              Join as Listener
+              Join A Session
             </Link>
           </div>
+          <div className="hero-mini-grid">
+            <div className="mini-feature">
+              <span>Live capture</span>
+              <strong>Device audio, microphone, or audio file</strong>
+            </div>
+            <div className="mini-feature">
+              <span>Access</span>
+              <strong>QR join, room code, and direct listener links</strong>
+            </div>
+            <div className="mini-feature">
+              <span>Experience</span>
+              <strong>Real-time playback, room presence, and chat</strong>
+            </div>
+          </div>
         </div>
-        <div className="hero-panel">
-          <div className="metric-card">
-            <span>Host modes</span>
-            <strong>Laptop Audio, Phone Mic, Audio File</strong>
-          </div>
-          <div className="metric-card">
-            <span>Experience</span>
-            <strong>Low-latency live listening</strong>
-          </div>
-          <div className="metric-card">
-            <span>Best environment</span>
-            <strong>Same Wi-Fi / Hotspot</strong>
+        <div className="hero-panel home-hero-panel">
+          <div className="home-spotlight">
+            <p className="section-kicker">Why it feels simpler</p>
+            <div className="spotlight-list">
+              <div className="spotlight-row">
+                <strong>Host studio</strong>
+                <span>Start, monitor, and share from one place</span>
+              </div>
+              <div className="spotlight-row">
+                <strong>Listener flow</strong>
+                <span>Scan, validate, join, and resume cleanly</span>
+              </div>
+              <div className="spotlight-row">
+                <strong>Shared room</strong>
+                <span>See who is inside and coordinate with chat</span>
+              </div>
+            </div>
           </div>
         </div>
       </section>
 
-      <section id="how-it-works" className="content-grid slide-up">
+      <section id="how-it-works" className="content-grid home-grid slide-up">
         <article className="content-card">
-          <h2>How it works</h2>
+          <h2>Host with intent</h2>
           <p>
-            The host starts a room, captures browser or system audio with
-            permission, and broadcasts that audio stream to connected listeners.
+            Choose the source that matches the moment. Device audio is best for browser or system playback, microphone is
+            best for speaking rooms, and audio file mode is a stable mobile fallback.
           </p>
         </article>
         <article className="content-card">
-          <h2>Instant QR Join</h2>
+          <h2>Join without friction</h2>
           <p>
-            Listeners scan the generated QR code, validate the room, and tap one
-            large join button to start playback on mobile or desktop.
+            Listeners can scan a QR code, use a camera photo, or type the room code manually. The room page validates the
+            session before they commit to joining.
           </p>
         </article>
         <article className="content-card">
-          <h2>Built for classrooms</h2>
+          <h2>Built for shared moments</h2>
           <p>
-            TOGETHER is tuned for nearby group listening in seminar halls,
-            labs, hostels, and shared event spaces.
+            TOGETHER works well for nearby listening, but it is not limited to that. It is just as useful for remote
+            room links, companion listening, walkthroughs, and guided sessions.
           </p>
         </article>
       </section>

@@ -486,181 +486,205 @@ export default function LiveSessionPage() {
       lockNavigation={!isLeaving && status !== "Session ended" && status !== "Unavailable"}
       lockLabel="Leave the room before navigating"
     >
-      <section className="center-card workspace-card fade-in">
-        <StatusBadge tone={connected ? "success" : "warning"}>{status}</StatusBadge>
-        <h1>Listening Live</h1>
-        <p className="hero-text compact">
-          Room <strong>{roomId}</strong> is connected to the shared audio session.
-        </p>
-        <p className="subtle-text listener-note">{sessionNote}</p>
-
-        {error ? <p className="error-banner">{error}</p> : null}
-
-        <audio
-          ref={audioRef}
-          autoPlay
-          playsInline
-          controls
-          className="debug-audio-player"
-          onPause={() => {
-            if (connectedRef.current && !awaitingGestureRef.current && hiddenRef.current) {
-              attemptPlaybackResume("audio paused in background");
-            }
-          }}
-        />
-
-        <div className="workspace-hero compact-workspace-hero">
-          <div className="workspace-kpis">
-            <div className="workspace-stat">
-              <span>Room</span>
-              <strong>{roomId}</strong>
-            </div>
-            <div className="workspace-stat">
-              <span>People</span>
-              <strong>{participantList.length}</strong>
-            </div>
-            <div className="workspace-stat">
-              <span>Status</span>
-              <strong>{connected ? "Live" : "Connecting"}</strong>
-            </div>
+      <section className="listener-shell fade-in">
+        <aside className="content-card listener-sidebar">
+          <div className="studio-brand">
+            <p className="eyebrow">Listener view</p>
+            <h2>Stay in sync</h2>
+            <p className="subtle-text">
+              Playback, room presence, and chat are separated so the listening experience stays focused.
+            </p>
           </div>
-          <div className="button-row workspace-actions">
-            <button type="button" className="button-primary" onClick={handleManualPlay}>
-              {awaitingGesture ? "Tap To Enable Audio" : "Play Audio"}
+
+          <div className="studio-nav" role="tablist" aria-label="Listener sections">
+            <button
+              type="button"
+              className={activeTab === "player" ? "studio-nav-button active" : "studio-nav-button"}
+              onClick={() => setActiveTab("player")}
+            >
+              <strong>Player</strong>
+              <span>Audio controls and playback state</span>
             </button>
             <button
               type="button"
-              className="button-secondary"
-              onClick={handleLeaveRoom}
+              className={activeTab === "people" ? "studio-nav-button active" : "studio-nav-button"}
+              onClick={() => setActiveTab("people")}
             >
-              Leave Session
+              <strong>People</strong>
+              <span>See who is in the room right now</span>
+            </button>
+            <button
+              type="button"
+              className={activeTab === "chat" ? "studio-nav-button active" : "studio-nav-button"}
+              onClick={() => setActiveTab("chat")}
+            >
+              <strong>Chat</strong>
+              <span>Message the host or the whole room</span>
             </button>
           </div>
-        </div>
 
-        <div className="app-tabs" role="tablist" aria-label="Listener sections">
-          <button
-            type="button"
-            className={activeTab === "player" ? "app-tab active" : "app-tab"}
-            onClick={() => setActiveTab("player")}
-          >
-            Player
-          </button>
-          <button
-            type="button"
-            className={activeTab === "people" ? "app-tab active" : "app-tab"}
-            onClick={() => setActiveTab("people")}
-          >
-            People
-          </button>
-          <button
-            type="button"
-            className={activeTab === "chat" ? "app-tab active" : "app-tab"}
-            onClick={() => setActiveTab("chat")}
-          >
-            Chat
-          </button>
-        </div>
-
-        <div className="player-card">
-          {activeTab === "player" ? (
-            <div className="app-panel">
-              <label className="volume-stack" htmlFor="volume">
-                Volume
-                <input
-                  id="volume"
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={volume}
-                  onChange={handleVolumeChange}
-                />
-              </label>
+          <div className="studio-sidebar-footer">
+            <StatusBadge tone={connected ? "success" : "warning"}>{status}</StatusBadge>
+            <div className="button-row sidebar-actions">
+              <button type="button" className="button-primary" onClick={handleManualPlay}>
+                {awaitingGesture ? "Enable Audio" : "Play"}
+              </button>
               <button
                 type="button"
-                className="button-secondary diagnostics-toggle"
-                onClick={() => setShowDiagnostics((current) => !current)}
+                className="button-secondary"
+                onClick={handleLeaveRoom}
               >
-                {showDiagnostics ? "Hide Details" : "Connection Details"}
+                Leave
               </button>
-              {showDiagnostics ? (
-                <div className="diagnostic-card">
-                  <strong>Connection details</strong>
-                  {diagnostics.map((item, index) => (
-                    <p key={`${item}-${index}`} className="diagnostic-line">
-                      {item}
-                    </p>
-                  ))}
-                </div>
-              ) : null}
             </div>
-          ) : null}
+          </div>
+        </aside>
 
-          {activeTab === "people" ? (
-            <div className="app-panel">
-              <div className="panel-heading">
-                <h2>People in this room</h2>
-                <span className="mini-caption">Live room presence</span>
+        <article className="content-card listener-main">
+          <div className="section-header compact-section-header">
+            <div>
+              <p className="eyebrow">TOGETHER</p>
+              <h1>Listening live</h1>
+            </div>
+          </div>
+
+          <p className="hero-text compact">
+            Room <strong>{roomId}</strong> is connected to the shared audio session.
+          </p>
+          <p className="subtle-text listener-note">{sessionNote}</p>
+
+          {error ? <p className="error-banner">{error}</p> : null}
+
+          <audio
+            ref={audioRef}
+            autoPlay
+            playsInline
+            controls
+            className="debug-audio-player"
+            onPause={() => {
+              if (connectedRef.current && !awaitingGestureRef.current && hiddenRef.current) {
+                attemptPlaybackResume("audio paused in background");
+              }
+            }}
+          />
+
+          <div className="workspace-hero compact-workspace-hero compact-hero">
+            <div className="workspace-kpis">
+              <div className="workspace-stat">
+                <span>Room</span>
+                <strong>{roomId}</strong>
               </div>
-              <div className="listener-list">
-                {participantList.length === 0 ? (
-                  <p className="empty-state">Room members will appear here.</p>
-                ) : (
-                  participantList.map((user) => (
-                    <div key={user.id} className="listener-pill participant-pill">
-                      <span>{user.username}</span>
-                      <strong>{user.role}</strong>
-                    </div>
-                  ))
-                )}
+              <div className="workspace-stat">
+                <span>People</span>
+                <strong>{participantList.length}</strong>
+              </div>
+              <div className="workspace-stat">
+                <span>Status</span>
+                <strong>{connected ? "Live" : "Connecting"}</strong>
               </div>
             </div>
-          ) : null}
+          </div>
 
-          {activeTab === "chat" ? (
-            <div className="app-panel">
-              <div className="panel-heading">
-                <h2>Room chat</h2>
-                <span className="mini-caption">Talk to host or everyone</span>
-              </div>
-              <div className="chat-feed chat-feed-large">
-                {chatMessages.length === 0 ? (
-                  <p className="empty-state">Messages shared in this room will appear here.</p>
-                ) : (
-                  chatMessages.map((message) => (
-                    <div key={message.id} className="chat-bubble">
-                      <div className="chat-meta">
-                        <strong>{message.senderName}</strong>
-                        <span>{message.audience}</span>
-                      </div>
-                      <p>{message.message}</p>
-                    </div>
-                  ))
-                )}
-              </div>
-              <div className="chat-compose">
-                <select
-                  className="text-input chat-select"
-                  value={chatAudience}
-                  onChange={(event) => setChatAudience(event.target.value)}
+          <div className="player-card listener-stage">
+            {activeTab === "player" ? (
+              <div className="app-panel">
+                <label className="volume-stack" htmlFor="volume">
+                  Volume
+                  <input
+                    id="volume"
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={volume}
+                    onChange={handleVolumeChange}
+                  />
+                </label>
+                <button
+                  type="button"
+                  className="button-secondary diagnostics-toggle"
+                  onClick={() => setShowDiagnostics((current) => !current)}
                 >
-                  <option value="everyone">Message everyone</option>
-                  <option value="host">Message host only</option>
-                </select>
-                <input
-                  className="text-input"
-                  placeholder="Send a message"
-                  value={chatInput}
-                  maxLength={220}
-                  onChange={(event) => setChatInput(event.target.value)}
-                />
-                <button type="button" className="button-primary" onClick={handleSendChat}>
-                  Send
+                  {showDiagnostics ? "Hide Details" : "Connection Details"}
                 </button>
+                {showDiagnostics ? (
+                  <div className="diagnostic-card">
+                    <strong>Connection details</strong>
+                    {diagnostics.map((item, index) => (
+                      <p key={`${item}-${index}`} className="diagnostic-line">
+                        {item}
+                      </p>
+                    ))}
+                  </div>
+                ) : null}
               </div>
-            </div>
-          ) : null}
-        </div>
+            ) : null}
+
+            {activeTab === "people" ? (
+              <div className="app-panel">
+                <div className="panel-heading">
+                  <h2>People in this room</h2>
+                  <span className="mini-caption">Live room presence</span>
+                </div>
+                <div className="listener-list">
+                  {participantList.length === 0 ? (
+                    <p className="empty-state">Room members will appear here.</p>
+                  ) : (
+                    participantList.map((user) => (
+                      <div key={user.id} className="listener-pill participant-pill">
+                        <span>{user.username}</span>
+                        <strong>{user.role}</strong>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </div>
+            ) : null}
+
+            {activeTab === "chat" ? (
+              <div className="app-panel">
+                <div className="panel-heading">
+                  <h2>Room chat</h2>
+                  <span className="mini-caption">Talk to host or everyone</span>
+                </div>
+                <div className="chat-feed chat-feed-large">
+                  {chatMessages.length === 0 ? (
+                    <p className="empty-state">Messages shared in this room will appear here.</p>
+                  ) : (
+                    chatMessages.map((message) => (
+                      <div key={message.id} className="chat-bubble">
+                        <div className="chat-meta">
+                          <strong>{message.senderName}</strong>
+                          <span>{message.audience}</span>
+                        </div>
+                        <p>{message.message}</p>
+                      </div>
+                    ))
+                  )}
+                </div>
+                <div className="chat-compose">
+                  <select
+                    className="text-input chat-select"
+                    value={chatAudience}
+                    onChange={(event) => setChatAudience(event.target.value)}
+                  >
+                    <option value="everyone">Message everyone</option>
+                    <option value="host">Message host only</option>
+                  </select>
+                  <input
+                    className="text-input"
+                    placeholder="Send a message"
+                    value={chatInput}
+                    maxLength={220}
+                    onChange={(event) => setChatInput(event.target.value)}
+                  />
+                  <button type="button" className="button-primary" onClick={handleSendChat}>
+                    Send
+                  </button>
+                </div>
+              </div>
+            ) : null}
+          </div>
+        </article>
       </section>
     </AppShell>
   );
