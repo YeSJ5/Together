@@ -291,6 +291,116 @@ button {
   gap: 18px;
 }
 
+.workspace-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.4fr) minmax(320px, 0.8fr);
+  gap: 20px;
+  align-items: start;
+}
+
+.workspace-main,
+.workspace-side,
+.workspace-card {
+  min-width: 0;
+}
+
+.workspace-hero {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 18px;
+  align-items: start;
+  margin-bottom: 22px;
+  padding: 18px;
+  border-radius: 22px;
+  background: rgba(247, 250, 255, 0.92);
+  border: 1px solid rgba(90, 123, 160, 0.12);
+}
+
+.compact-workspace-hero {
+  margin-top: 12px;
+}
+
+.workspace-kpis {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.workspace-stat {
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(255, 255, 255, 0.88);
+  border: 1px solid rgba(90, 123, 160, 0.1);
+}
+
+.workspace-stat span,
+.mini-caption {
+  color: #66788f;
+  font-size: 0.86rem;
+}
+
+.workspace-stat strong {
+  display: block;
+  margin-top: 6px;
+  color: #132238;
+  font-size: 1rem;
+}
+
+.workspace-actions {
+  margin-top: 0;
+  align-self: stretch;
+}
+
+.app-tabs {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 8px;
+  border-radius: 20px;
+  background: rgba(241, 246, 255, 0.92);
+  border: 1px solid rgba(90, 123, 160, 0.12);
+}
+
+.app-tab {
+  min-height: 48px;
+  border: 0;
+  border-radius: 16px;
+  background: transparent;
+  color: #53657b;
+  font-weight: 600;
+}
+
+.app-tab.active {
+  background: #15263d;
+  color: #fff8ef;
+  box-shadow: 0 12px 24px rgba(21, 38, 61, 0.18);
+}
+
+.app-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.panel-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.panel-heading h2 {
+  margin: 0;
+}
+
+.chat-feed-large {
+  max-height: 340px;
+}
+
+.qr-stack-center {
+  justify-items: center;
+}
+
 .hero-panel {
   align-content: start;
 }
@@ -653,7 +763,16 @@ button {
   .install-banner,
   .hero-card,
   .dashboard-grid,
+  .workspace-grid,
   .content-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-hero {
+    grid-template-columns: 1fr;
+  }
+
+  .workspace-kpis {
     grid-template-columns: 1fr;
   }
 
@@ -677,6 +796,12 @@ button {
   .hero-copy h1,
   .center-card h1 {
     font-size: 2.3rem;
+  }
+
+  .app-tabs {
+    position: sticky;
+    top: 12px;
+    z-index: 5;
   }
 
   .install-actions,

@@ -52,6 +52,7 @@ export default function HostDashboardPage() {
     nativeAndroid: false,
     systemAudioCapture: false
   });
+  const [activeTab, setActiveTab] = useState("studio");
   const streamRef = useRef(null);
   const captureStreamRef = useRef(null);
   const nativeCaptureRef = useRef(null);
@@ -632,8 +633,8 @@ export default function HostDashboardPage() {
       lockNavigation={Boolean(session)}
       lockLabel="Finish or end the live session first"
     >
-      <section className="dashboard-grid">
-        <article className="content-card large-card fade-in">
+      <section className="workspace-grid">
+        <article className="content-card workspace-main fade-in">
           <div className="section-header">
             <div>
               <p className="eyebrow">Host dashboard</p>
@@ -642,105 +643,239 @@ export default function HostDashboardPage() {
             <StatusBadge tone={session ? "success" : "neutral"}>{status}</StatusBadge>
           </div>
 
-          <div className="source-toggle">
-            <button
-              type="button"
-              className={audioSourceMode === "device-audio" ? "chip active" : "chip"}
-              onClick={() => setAudioSourceMode("device-audio")}
-              disabled={!canUseDeviceAudio}
-            >
-              Device Audio
-            </button>
-            <button
-              type="button"
-              className={audioSourceMode === "microphone" ? "chip active" : "chip"}
-              onClick={() => setAudioSourceMode("microphone")}
-            >
-              Microphone
-            </button>
-            <button
-              type="button"
-              className={audioSourceMode === "audio-file" ? "chip active" : "chip"}
-              onClick={() => setAudioSourceMode("audio-file")}
-            >
-              Audio File
-            </button>
-          </div>
-
-          <input
-            className="text-input"
-            placeholder="Host name"
-            value={hostName}
-            maxLength={32}
-            onChange={(event) => setHostName(sanitizeDisplayName(event.target.value, ""))}
-            disabled={Boolean(session)}
-          />
-
-          <p className="subtle-text">
-            Start a room, share audio clearly, and keep everyone in sync without extra noise on the screen.
-          </p>
-          {audioSourceMode === "audio-file" ? (
-            <div className="file-host-panel">
-              <label className="file-picker" htmlFor="audio-file-input">
-                Choose audio file
-              </label>
-              <input
-                id="audio-file-input"
-                className="file-input"
-                type="file"
-                accept="audio/*"
-                onChange={(event) => {
-                  setSelectedAudioFile(event.target.files?.[0] || null);
-                }}
-              />
-              <p className="subtle-text">
-                Best mobile fallback: pick a song, lecture clip, or podcast file from
-                your phone and TOGETHER will stream it live to listeners.
-              </p>
-              <p className="subtle-text">
-                {selectedAudioFile
-                  ? `Selected file: ${selectedAudioFile.name}`
-                  : "No audio file selected yet."}
-              </p>
+          <div className="workspace-hero">
+            <div className="workspace-kpis">
+              <div className="workspace-stat">
+                <span>Room</span>
+                <strong>{session?.roomId || "Not live"}</strong>
+              </div>
+              <div className="workspace-stat">
+                <span>Listeners</span>
+                <strong>{connectedUsers.length}</strong>
+              </div>
+              <div className="workspace-stat">
+                <span>Mode</span>
+                <strong>
+                  {audioSourceMode === "device-audio"
+                    ? "Device Audio"
+                    : audioSourceMode === "audio-file"
+                      ? "Audio File"
+                      : "Microphone"}
+                </strong>
+              </div>
             </div>
-          ) : null}
-          {isMobileHost ? (
-            <p className="subtle-text">
-              Hosting from a phone works best in <strong>Microphone</strong> or
-              <strong> Audio File</strong> mode. Start the room on your phone and
-              nearby devices can join exactly the same way with the QR code.
-              {nativeCapabilities.systemAudioCapture
-                ? " Native mobile capture is available on supported Android setups."
-                : " Mobile browsers still do not reliably support full device audio output sharing."}
-            </p>
-          ) : null}
-
-          <div className="button-row">
-            <button
-              type="button"
-              className="button-primary"
-              onClick={handleStartSession}
-              disabled={Boolean(session) || isStarting}
-            >
-              {isStarting ? "Starting..." : "Start Sharing Session"}
-            </button>
-            <button
-              type="button"
-              className="button-secondary"
-              onClick={handleEndSession}
-              disabled={!session}
-            >
-              End Session
-            </button>
+            <div className="button-row workspace-actions">
+              <button
+                type="button"
+                className="button-primary"
+                onClick={handleStartSession}
+                disabled={Boolean(session) || isStarting}
+              >
+                {isStarting ? "Starting..." : "Start Sharing Session"}
+              </button>
+              <button
+                type="button"
+                className="button-secondary"
+                onClick={handleEndSession}
+                disabled={!session}
+              >
+                End Session
+              </button>
+            </div>
           </div>
 
           {error ? <p className="error-banner">{error}</p> : null}
+
+          <div className="app-tabs" role="tablist" aria-label="Host sections">
+            <button
+              type="button"
+              className={activeTab === "studio" ? "app-tab active" : "app-tab"}
+              onClick={() => setActiveTab("studio")}
+            >
+              Studio
+            </button>
+            <button
+              type="button"
+              className={activeTab === "people" ? "app-tab active" : "app-tab"}
+              onClick={() => setActiveTab("people")}
+            >
+              People
+            </button>
+            <button
+              type="button"
+              className={activeTab === "chat" ? "app-tab active" : "app-tab"}
+              onClick={() => setActiveTab("chat")}
+            >
+              Chat
+            </button>
+          </div>
+
+          {activeTab === "studio" ? (
+            <div className="app-panel">
+              <div className="source-toggle">
+                <button
+                  type="button"
+                  className={audioSourceMode === "device-audio" ? "chip active" : "chip"}
+                  onClick={() => setAudioSourceMode("device-audio")}
+                  disabled={!canUseDeviceAudio}
+                >
+                  Device Audio
+                </button>
+                <button
+                  type="button"
+                  className={audioSourceMode === "microphone" ? "chip active" : "chip"}
+                  onClick={() => setAudioSourceMode("microphone")}
+                >
+                  Microphone
+                </button>
+                <button
+                  type="button"
+                  className={audioSourceMode === "audio-file" ? "chip active" : "chip"}
+                  onClick={() => setAudioSourceMode("audio-file")}
+                >
+                  Audio File
+                </button>
+              </div>
+
+              <input
+                className="text-input"
+                placeholder="Host name"
+                value={hostName}
+                maxLength={32}
+                onChange={(event) => setHostName(sanitizeDisplayName(event.target.value, ""))}
+                disabled={Boolean(session)}
+              />
+
+              <p className="subtle-text">
+                Start a room, share audio clearly, and keep everyone in sync without needing to hunt through the page.
+              </p>
+
+              {audioSourceMode === "audio-file" ? (
+                <div className="file-host-panel">
+                  <label className="file-picker" htmlFor="audio-file-input">
+                    Choose audio file
+                  </label>
+                  <input
+                    id="audio-file-input"
+                    className="file-input"
+                    type="file"
+                    accept="audio/*"
+                    onChange={(event) => {
+                      setSelectedAudioFile(event.target.files?.[0] || null);
+                    }}
+                  />
+                  <p className="subtle-text">
+                    Best mobile fallback: pick a song, lecture clip, or podcast file from your phone and TOGETHER will stream it live to listeners.
+                  </p>
+                  <p className="subtle-text">
+                    {selectedAudioFile
+                      ? `Selected file: ${selectedAudioFile.name}`
+                      : "No audio file selected yet."}
+                  </p>
+                </div>
+              ) : null}
+
+              {isMobileHost ? (
+                <p className="subtle-text">
+                  Hosting from a phone works best in <strong>Microphone</strong> or <strong>Audio File</strong> mode.
+                  {nativeCapabilities.systemAudioCapture
+                    ? " Native mobile capture is available on supported Android setups."
+                    : " Mobile browsers still do not reliably support full device audio output sharing."}
+                </p>
+              ) : null}
+            </div>
+          ) : null}
+
+          {activeTab === "people" ? (
+            <div className="app-panel">
+              <div className="panel-heading">
+                <h2>Participants</h2>
+                <button
+                  type="button"
+                  className="button-secondary diagnostics-toggle"
+                  onClick={() => setShowHostDetails((current) => !current)}
+                >
+                  {showHostDetails ? "Hide Details" : "View Details"}
+                </button>
+              </div>
+              {showHostDetails ? (
+                <div className="diagnostic-card">
+                  <strong>Host details</strong>
+                  <p className="diagnostic-line">{audioDebug}</p>
+                  <p className="diagnostic-line">{hostSignalDebug}</p>
+                </div>
+              ) : null}
+              <div className="listener-list">
+                {participantList.length === 0 ? (
+                  <p className="empty-state">No participants yet.</p>
+                ) : (
+                  participantList.map((user) => (
+                    <div key={user.id} className="listener-pill participant-pill">
+                      <span>{user.username}</span>
+                      <strong>{user.role}</strong>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="activity-feed">
+                <p className="section-kicker">Recent activity</p>
+                {recentActivity.length === 0 ? (
+                  <p className="empty-state">Join and leave updates will appear here.</p>
+                ) : (
+                  recentActivity.map((item, index) => (
+                    <p key={`${item}-${index}`} className="activity-line">
+                      {item}
+                    </p>
+                  ))
+                )}
+              </div>
+            </div>
+          ) : null}
+
+          {activeTab === "chat" ? (
+            <div className="app-panel">
+              <div className="panel-heading">
+                <h2>Room chat</h2>
+                <span className="mini-caption">Quick coordination while the session stays live</span>
+              </div>
+              <div className="chat-feed chat-feed-large">
+                {chatMessages.length === 0 ? (
+                  <p className="empty-state">Room messages will appear here.</p>
+                ) : (
+                  chatMessages.map((message) => (
+                    <div key={message.id} className="chat-bubble">
+                      <div className="chat-meta">
+                        <strong>{message.senderName}</strong>
+                        <span>{message.audience}</span>
+                      </div>
+                      <p>{message.message}</p>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="chat-compose">
+                <input
+                  className="text-input"
+                  placeholder="Send a message to the room"
+                  value={chatInput}
+                  maxLength={220}
+                  onChange={(event) => setChatInput(event.target.value)}
+                />
+                <button type="button" className="button-primary" onClick={handleSendChat}>
+                  Send
+                </button>
+              </div>
+            </div>
+          ) : null}
         </article>
 
-        <article className="content-card slide-up">
-          <h2>Session Access</h2>
+        <aside className="content-card workspace-side slide-up">
+          <div className="panel-heading">
+            <h2>Session access</h2>
+            <span className="mini-caption">Share once, let everyone join fast</span>
+          </div>
           {session ? (
-            <div className="qr-stack">
+            <div className="qr-stack qr-stack-center">
               <div className="qr-card">
                 <QRCode value={joinUrl} size={180} />
               </div>
@@ -769,89 +904,7 @@ export default function HostDashboardPage() {
               Start a session to generate the room, QR code, and join link.
             </p>
           )}
-        </article>
-
-        <article className="content-card slide-up">
-          <h2>Participants</h2>
-          <p className="listener-count">{connectedUsers.length}</p>
-          <p className="subtle-text">
-            {connectedUsers.length === 0
-              ? "Share the QR or link to bring listeners into the room."
-              : "Listeners are connected and ready for the live stream."}
-          </p>
-          <button
-            type="button"
-            className="button-secondary diagnostics-toggle"
-            onClick={() => setShowHostDetails((current) => !current)}
-          >
-            {showHostDetails ? "Hide Details" : "View Details"}
-          </button>
-          {showHostDetails ? (
-            <div className="diagnostic-card">
-              <strong>Host details</strong>
-              <p className="diagnostic-line">{audioDebug}</p>
-              <p className="diagnostic-line">{hostSignalDebug}</p>
-            </div>
-          ) : null}
-          <div className="listener-list">
-            {participantList.length === 0 ? (
-              <p className="empty-state">No participants yet.</p>
-            ) : (
-              participantList.map((user) => (
-                <div key={user.id} className="listener-pill participant-pill">
-                  <span>{user.username}</span>
-                  <strong>{user.role}</strong>
-                </div>
-                ))
-              )}
-            </div>
-            <div className="activity-feed">
-              <p className="section-kicker">Recent activity</p>
-              {recentActivity.length === 0 ? (
-                <p className="empty-state">Join and leave updates will appear here.</p>
-              ) : (
-                recentActivity.map((item, index) => (
-                  <p key={`${item}-${index}`} className="activity-line">
-                    {item}
-                  </p>
-                ))
-              )}
-            </div>
-        </article>
-
-        <article className="content-card slide-up">
-          <h2>Room chat</h2>
-          <p className="subtle-text">
-            Keep the room coordinated with quick text updates.
-          </p>
-          <div className="chat-feed">
-            {chatMessages.length === 0 ? (
-              <p className="empty-state">Room messages will appear here.</p>
-            ) : (
-              chatMessages.map((message) => (
-                <div key={message.id} className="chat-bubble">
-                  <div className="chat-meta">
-                    <strong>{message.senderName}</strong>
-                    <span>{message.audience}</span>
-                  </div>
-                  <p>{message.message}</p>
-                </div>
-              ))
-            )}
-          </div>
-          <div className="chat-compose">
-            <input
-              className="text-input"
-              placeholder="Send a message to the room"
-              value={chatInput}
-              maxLength={220}
-              onChange={(event) => setChatInput(event.target.value)}
-            />
-            <button type="button" className="button-primary" onClick={handleSendChat}>
-              Send
-            </button>
-          </div>
-        </article>
+        </aside>
       </section>
     </AppShell>
   );

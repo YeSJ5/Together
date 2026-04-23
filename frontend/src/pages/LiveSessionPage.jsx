@@ -46,6 +46,7 @@ export default function LiveSessionPage() {
     "Stay on this page until the stream starts. On many phones, live browser audio is most reliable while the app stays visible."
   );
   const [isLeaving, setIsLeaving] = useState(false);
+  const [activeTab, setActiveTab] = useState("player");
 
   useNavigationLock(
     !isLeaving && status !== "Session ended" && status !== "Unavailable",
@@ -485,7 +486,7 @@ export default function LiveSessionPage() {
       lockNavigation={!isLeaving && status !== "Session ended" && status !== "Unavailable"}
       lockLabel="Leave the room before navigating"
     >
-      <section className="center-card fade-in">
+      <section className="center-card workspace-card fade-in">
         <StatusBadge tone={connected ? "success" : "warning"}>{status}</StatusBadge>
         <h1>Listening Live</h1>
         <p className="hero-text compact">
@@ -508,100 +509,157 @@ export default function LiveSessionPage() {
           }}
         />
 
+        <div className="workspace-hero compact-workspace-hero">
+          <div className="workspace-kpis">
+            <div className="workspace-stat">
+              <span>Room</span>
+              <strong>{roomId}</strong>
+            </div>
+            <div className="workspace-stat">
+              <span>People</span>
+              <strong>{participantList.length}</strong>
+            </div>
+            <div className="workspace-stat">
+              <span>Status</span>
+              <strong>{connected ? "Live" : "Connecting"}</strong>
+            </div>
+          </div>
+          <div className="button-row workspace-actions">
+            <button type="button" className="button-primary" onClick={handleManualPlay}>
+              {awaitingGesture ? "Tap To Enable Audio" : "Play Audio"}
+            </button>
+            <button
+              type="button"
+              className="button-secondary"
+              onClick={handleLeaveRoom}
+            >
+              Leave Session
+            </button>
+          </div>
+        </div>
+
+        <div className="app-tabs" role="tablist" aria-label="Listener sections">
+          <button
+            type="button"
+            className={activeTab === "player" ? "app-tab active" : "app-tab"}
+            onClick={() => setActiveTab("player")}
+          >
+            Player
+          </button>
+          <button
+            type="button"
+            className={activeTab === "people" ? "app-tab active" : "app-tab"}
+            onClick={() => setActiveTab("people")}
+          >
+            People
+          </button>
+          <button
+            type="button"
+            className={activeTab === "chat" ? "app-tab active" : "app-tab"}
+            onClick={() => setActiveTab("chat")}
+          >
+            Chat
+          </button>
+        </div>
+
         <div className="player-card">
-          <button type="button" className="button-primary large-button" onClick={handleManualPlay}>
-            {awaitingGesture ? "Tap To Enable Audio" : "Play Audio"}
-          </button>
-          <button
-            type="button"
-            className="button-secondary large-button"
-            onClick={handleLeaveRoom}
-          >
-            Leave Session
-          </button>
-          <label className="volume-stack" htmlFor="volume">
-            Volume
-            <input
-              id="volume"
-              type="range"
-              min="0"
-              max="100"
-              value={volume}
-              onChange={handleVolumeChange}
-            />
-          </label>
-          <button
-            type="button"
-            className="button-secondary diagnostics-toggle"
-            onClick={() => setShowDiagnostics((current) => !current)}
-          >
-            {showDiagnostics ? "Hide Details" : "Connection Details"}
-          </button>
-          {showDiagnostics ? (
-            <div className="diagnostic-card">
-              <strong>Connection details</strong>
-              {diagnostics.map((item, index) => (
-                <p key={`${item}-${index}`} className="diagnostic-line">
-                  {item}
-                </p>
-              ))}
+          {activeTab === "player" ? (
+            <div className="app-panel">
+              <label className="volume-stack" htmlFor="volume">
+                Volume
+                <input
+                  id="volume"
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={volume}
+                  onChange={handleVolumeChange}
+                />
+              </label>
+              <button
+                type="button"
+                className="button-secondary diagnostics-toggle"
+                onClick={() => setShowDiagnostics((current) => !current)}
+              >
+                {showDiagnostics ? "Hide Details" : "Connection Details"}
+              </button>
+              {showDiagnostics ? (
+                <div className="diagnostic-card">
+                  <strong>Connection details</strong>
+                  {diagnostics.map((item, index) => (
+                    <p key={`${item}-${index}`} className="diagnostic-line">
+                      {item}
+                    </p>
+                  ))}
+                </div>
+              ) : null}
             </div>
           ) : null}
 
-          <div className="participant-section">
-            <strong>People in this room</strong>
-            <div className="listener-list">
-              {participantList.length === 0 ? (
-                <p className="empty-state">Room members will appear here.</p>
-              ) : (
-                participantList.map((user) => (
-                  <div key={user.id} className="listener-pill participant-pill">
-                    <span>{user.username}</span>
-                    <strong>{user.role}</strong>
-                  </div>
-                ))
-              )}
-            </div>
-          </div>
-
-          <div className="participant-section">
-            <strong>Room chat</strong>
-            <div className="chat-feed">
-              {chatMessages.length === 0 ? (
-                <p className="empty-state">Messages shared in this room will appear here.</p>
-              ) : (
-                chatMessages.map((message) => (
-                  <div key={message.id} className="chat-bubble">
-                    <div className="chat-meta">
-                      <strong>{message.senderName}</strong>
-                      <span>{message.audience}</span>
+          {activeTab === "people" ? (
+            <div className="app-panel">
+              <div className="panel-heading">
+                <h2>People in this room</h2>
+                <span className="mini-caption">Live room presence</span>
+              </div>
+              <div className="listener-list">
+                {participantList.length === 0 ? (
+                  <p className="empty-state">Room members will appear here.</p>
+                ) : (
+                  participantList.map((user) => (
+                    <div key={user.id} className="listener-pill participant-pill">
+                      <span>{user.username}</span>
+                      <strong>{user.role}</strong>
                     </div>
-                    <p>{message.message}</p>
-                  </div>
-                ))
-              )}
+                  ))
+                )}
+              </div>
             </div>
-            <div className="chat-compose">
-              <select
-                className="text-input chat-select"
-                value={chatAudience}
-                onChange={(event) => setChatAudience(event.target.value)}
-              >
-                <option value="everyone">Message everyone</option>
-                <option value="host">Message host only</option>
-              </select>
-              <input
-                className="text-input"
-                placeholder="Send a message"
-                value={chatInput}
-                maxLength={220}
-                onChange={(event) => setChatInput(event.target.value)}
-              />
-              <button type="button" className="button-primary" onClick={handleSendChat}>
-                Send
-              </button>
+          ) : null}
+
+          {activeTab === "chat" ? (
+            <div className="app-panel">
+              <div className="panel-heading">
+                <h2>Room chat</h2>
+                <span className="mini-caption">Talk to host or everyone</span>
+              </div>
+              <div className="chat-feed chat-feed-large">
+                {chatMessages.length === 0 ? (
+                  <p className="empty-state">Messages shared in this room will appear here.</p>
+                ) : (
+                  chatMessages.map((message) => (
+                    <div key={message.id} className="chat-bubble">
+                      <div className="chat-meta">
+                        <strong>{message.senderName}</strong>
+                        <span>{message.audience}</span>
+                      </div>
+                      <p>{message.message}</p>
+                    </div>
+                  ))
+                )}
+              </div>
+              <div className="chat-compose">
+                <select
+                  className="text-input chat-select"
+                  value={chatAudience}
+                  onChange={(event) => setChatAudience(event.target.value)}
+                >
+                  <option value="everyone">Message everyone</option>
+                  <option value="host">Message host only</option>
+                </select>
+                <input
+                  className="text-input"
+                  placeholder="Send a message"
+                  value={chatInput}
+                  maxLength={220}
+                  onChange={(event) => setChatInput(event.target.value)}
+                />
+                <button type="button" className="button-primary" onClick={handleSendChat}>
+                  Send
+                </button>
+              </div>
             </div>
-          </div>
+          ) : null}
         </div>
       </section>
     </AppShell>
