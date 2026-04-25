@@ -1137,66 +1137,6 @@ button {
   margin-top: 18px;
 }
 
-.blackout-mode {
-  position: fixed;
-  inset: 0;
-  z-index: 20;
-  display: grid;
-  place-items: center;
-  padding: 24px;
-  background: #020406;
-}
-
-.blackout-inner {
-  width: min(560px, 100%);
-  display: grid;
-  gap: 18px;
-  text-align: center;
-  color: #f7fbff;
-}
-
-.blackout-kicker {
-  margin: 0;
-  text-transform: uppercase;
-  letter-spacing: 0.16em;
-  font-size: 0.8rem;
-  color: rgba(247, 251, 255, 0.64);
-}
-
-.blackout-inner h1 {
-  margin: 0;
-  font-size: clamp(2rem, 6vw, 3.8rem);
-  letter-spacing: -0.05em;
-}
-
-.blackout-copy {
-  margin: 0;
-  color: rgba(247, 251, 255, 0.78);
-}
-
-.blackout-status-row {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  gap: 12px;
-  flex-wrap: wrap;
-}
-
-.blackout-room {
-  color: rgba(247, 251, 255, 0.72);
-}
-
-.blackout-audio-player {
-  margin-top: 0;
-  filter: brightness(0.72);
-}
-
-.blackout-actions {
-  display: grid;
-  grid-template-columns: 1fr 1fr;
-  gap: 12px;
-}
-
 .fade-in {
   animation: fadeIn 0.55s ease both;
 }
@@ -1318,8 +1258,7 @@ button {
     align-items: stretch;
   }
 
-  .topbar-actions,
-  .blackout-actions {
+  .topbar-actions {
     grid-template-columns: 1fr;
     flex-direction: column;
   }
