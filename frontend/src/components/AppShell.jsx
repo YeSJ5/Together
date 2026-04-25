@@ -1,4 +1,5 @@
 import { Link, useLocation } from "react-router-dom";
+import { useEffect, useState } from "react";
 import PwaPrompt from "./PwaPrompt";
 
 export default function AppShell({ children }) {
@@ -8,6 +9,21 @@ export default function AppShell({ children }) {
     location.pathname === "/" ||
     location.pathname.startsWith("/join") ||
     location.pathname.startsWith("/listen");
+  const [theme, setTheme] = useState(() => {
+    const savedTheme = localStorage.getItem("together-theme");
+    if (savedTheme === "dark" || savedTheme === "light") {
+      return savedTheme;
+    }
+
+    return window.matchMedia?.("(prefers-color-scheme: dark)")?.matches
+      ? "dark"
+      : "light";
+  });
+
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    localStorage.setItem("together-theme", theme);
+  }, [theme]);
 
   return (
     <div className="app-frame">
@@ -21,11 +37,20 @@ export default function AppShell({ children }) {
             </Link>
             <p className="topbar-copy">Listen Together. Instantly.</p>
           </div>
-          {!isHome ? (
-            <Link to="/" className="button-secondary topbar-home">
-              Home
-            </Link>
-          ) : null}
+          <div className="topbar-actions">
+            <button
+              type="button"
+              className="button-secondary theme-toggle"
+              onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
+            >
+              {theme === "dark" ? "Light Mode" : "Dark Mode"}
+            </button>
+            {!isHome ? (
+              <Link to="/" className="button-secondary topbar-home">
+                Home
+              </Link>
+            ) : null}
+          </div>
         </header>
         {shouldShowPwaPrompt ? <PwaPrompt /> : null}
         {children}

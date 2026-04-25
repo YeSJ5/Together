@@ -28,7 +28,7 @@ export default function ListenerJoinPage() {
   const [scanStatus, setScanStatus] = useState("");
   const [scannerSupported, setScannerSupported] = useState(false);
   const [savedListener, setSavedListener] = useState(null);
-  const [activeJoinTab, setActiveJoinTab] = useState(roomId ? "room" : "scan");
+  const [activeJoinTab, setActiveJoinTab] = useState(roomId ? "room" : "manual");
 
   useEffect(() => {
     setScannerSupported(
@@ -43,8 +43,14 @@ export default function ListenerJoinPage() {
   }, [roomId]);
 
   useEffect(() => {
-    setActiveJoinTab(roomId ? "room" : "scan");
+    setActiveJoinTab(roomId ? "room" : "manual");
   }, [roomId]);
+
+  useEffect(() => {
+    if (activeJoinTab !== "scan" && isScanning) {
+      stopScanner();
+    }
+  }, [activeJoinTab, isScanning]);
 
   useEffect(() => {
     if (!roomId) {
@@ -129,18 +135,46 @@ export default function ListenerJoinPage() {
       return;
     }
 
+    stopScanner();
     setError("");
     setScanStatus("Opening camera");
 
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: {
-          facingMode: {
-            ideal: "environment"
-          }
+      const cameraOptions = [
+        {
+          video: {
+            facingMode: {
+              ideal: "environment"
+            }
+          },
+          audio: false
         },
-        audio: false
-      });
+        {
+          video: {
+            facingMode: "environment"
+          },
+          audio: false
+        },
+        {
+          video: true,
+          audio: false
+        }
+      ];
+
+      let stream = null;
+
+      for (const mediaConstraints of cameraOptions) {
+        try {
+          stream = await navigator.mediaDevices.getUserMedia(mediaConstraints);
+          break;
+        } catch (_mediaError) {
+          stream = null;
+        }
+      }
+
+      if (!stream) {
+        throw new Error("camera-unavailable");
+      }
 
       scannerStreamRef.current = stream;
       setIsScanning(true);
@@ -186,7 +220,7 @@ export default function ListenerJoinPage() {
       scannerFrameRef.current = requestAnimationFrame(scanLoop);
     } catch (_error) {
       stopScanner();
-      setError("Camera access was denied. Enter the room ID manually instead.");
+      setError("Camera could not be opened on this phone. Use Room ID or Photo instead.");
     }
   }
 
@@ -370,6 +404,13 @@ export default function ListenerJoinPage() {
             <div className="app-tabs join-tabs" role="tablist" aria-label="Join methods">
               <button
                 type="button"
+                className={activeJoinTab === "manual" ? "app-tab active" : "app-tab"}
+                onClick={() => setActiveJoinTab("manual")}
+              >
+                Room ID
+              </button>
+              <button
+                type="button"
                 className={activeJoinTab === "scan" ? "app-tab active" : "app-tab"}
                 onClick={() => setActiveJoinTab("scan")}
               >
@@ -382,16 +423,32 @@ export default function ListenerJoinPage() {
               >
                 Photo
               </button>
-              <button
-                type="button"
-                className={activeJoinTab === "manual" ? "app-tab active" : "app-tab"}
-                onClick={() => setActiveJoinTab("manual")}
-              >
-                Room ID
-              </button>
             </div>
 
             <div className="join-panel">
+              {activeJoinTab === "manual" ? (
+                <div className="join-mode-card">
+                  <p className="hero-text compact">
+                    Enter the room code exactly as shared by the host.
+                  </p>
+                  <input
+                    className="text-input"
+                    placeholder="Enter room ID"
+                    value={manualRoomId}
+                    maxLength={16}
+                    onChange={(event) => setManualRoomId(normalizeRoomId(event.target.value))}
+                  />
+                  <button
+                    type="button"
+                    className="button-primary large-button"
+                    onClick={handleJoin}
+                    disabled={isJoining}
+                  >
+                    {isJoining ? "Opening..." : "Continue"}
+                  </button>
+                </div>
+              ) : null}
+
               {activeJoinTab === "scan" ? (
                 <div className="join-mode-card">
                   <p className="hero-text compact">
@@ -453,28 +510,6 @@ export default function ListenerJoinPage() {
                 </div>
               ) : null}
 
-              {activeJoinTab === "manual" ? (
-                <div className="join-mode-card">
-                  <p className="hero-text compact">
-                    Enter the room code exactly as shared by the host.
-                  </p>
-                  <input
-                    className="text-input"
-                    placeholder="Enter room ID"
-                    value={manualRoomId}
-                    maxLength={16}
-                    onChange={(event) => setManualRoomId(normalizeRoomId(event.target.value))}
-                  />
-                  <button
-                    type="button"
-                    className="button-primary large-button"
-                    onClick={handleJoin}
-                    disabled={isJoining}
-                  >
-                    {isJoining ? "Opening..." : "Continue"}
-                  </button>
-                </div>
-              ) : null}
             </div>
           </>
         )}

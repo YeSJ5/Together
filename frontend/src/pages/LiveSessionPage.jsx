@@ -57,6 +57,7 @@ export default function LiveSessionPage() {
     "Stay on this page until the stream starts. On many phones, live browser audio is most reliable while the app stays visible."
   );
   const [isLeaving, setIsLeaving] = useState(false);
+  const [blackoutMode, setBlackoutMode] = useState(false);
   const [activeTab, setActiveTab] = useState("player");
   const [unreadChatCount, setUnreadChatCount] = useState(0);
 
@@ -712,6 +713,13 @@ export default function LiveSessionPage() {
       </label>
       <button
         type="button"
+        className="button-secondary"
+        onClick={() => setBlackoutMode(true)}
+      >
+        Blackout Listening Mode
+      </button>
+      <button
+        type="button"
         className="button-secondary diagnostics-toggle"
         onClick={() => setShowDiagnostics((current) => !current)}
       >
@@ -800,7 +808,46 @@ export default function LiveSessionPage() {
       lockNavigation={!isLeaving && status !== "Session ended" && status !== "Unavailable"}
       lockLabel="Leave the room before navigating"
     >
-      {isCompactViewport ? (
+      {blackoutMode ? (
+        <section className="blackout-mode fade-in">
+          <div className="blackout-inner">
+            <p className="blackout-kicker">Blackout listening mode</p>
+            <h1>{connected ? "Audio stays focused" : "Waiting for audio"}</h1>
+            <p className="blackout-copy">
+              Keep the screen dim and untouched while TOGETHER continues playing. This is the best low-light fallback when true screen-off playback is not available.
+            </p>
+            <div className="blackout-status-row">
+              <StatusBadge tone={connected ? "success" : "warning"}>{status}</StatusBadge>
+              <span className="blackout-room">Room {roomId}</span>
+            </div>
+            <audio
+              ref={audioRef}
+              autoPlay
+              playsInline
+              controls
+              className="debug-audio-player blackout-audio-player"
+              onPause={() => {
+                if (connectedRef.current && !awaitingGestureRef.current && hiddenRef.current) {
+                  attemptPlaybackResume("audio paused in background");
+                }
+              }}
+            />
+            {error ? <p className="error-banner">{error}</p> : null}
+            <div className="blackout-actions">
+              <button type="button" className="button-primary" onClick={handleManualPlay}>
+                {awaitingGesture ? "Enable Audio" : "Play"}
+              </button>
+              <button
+                type="button"
+                className="button-secondary"
+                onClick={() => setBlackoutMode(false)}
+              >
+                Exit Blackout
+              </button>
+            </div>
+          </div>
+        </section>
+      ) : isCompactViewport ? (
         <section className="mobile-app-shell fade-in">
           <div className="content-card mobile-hero-card">
             <div className="mobile-title-row">
