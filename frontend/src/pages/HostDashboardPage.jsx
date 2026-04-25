@@ -55,6 +55,7 @@ export default function HostDashboardPage() {
     systemAudioCapture: false
   });
   const [activeTab, setActiveTab] = useState("studio");
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
   const streamRef = useRef(null);
   const captureStreamRef = useRef(null);
   const nativeCaptureRef = useRef(null);
@@ -139,6 +140,28 @@ export default function HostDashboardPage() {
       setActiveTab("studio");
     }
   }, [activeTab, isCompactViewport]);
+
+  useEffect(() => {
+    if (activeTab === "chat" && unreadChatCount) {
+      setUnreadChatCount(0);
+    }
+  }, [activeTab, unreadChatCount]);
+
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.title = unreadChatCount
+        ? `(${unreadChatCount}) TOGETHER | Listen Together. Instantly.`
+        : "TOGETHER | Listen Together. Instantly.";
+    }
+
+    if ("setAppBadge" in navigator) {
+      if (unreadChatCount > 0) {
+        navigator.setAppBadge(unreadChatCount).catch(() => {});
+      } else if ("clearAppBadge" in navigator) {
+        navigator.clearAppBadge().catch(() => {});
+      }
+    }
+  }, [unreadChatCount]);
 
   useEffect(() => {
     if (!session?.roomId) {
@@ -366,6 +389,10 @@ export default function HostDashboardPage() {
     setChatMessages((current) => {
       if (current.some((item) => item.id === message.id)) {
         return current;
+      }
+
+      if (activeTab !== "chat") {
+        setUnreadChatCount((count) => count + 1);
       }
 
       return [message, ...current].slice(0, 20);
@@ -850,7 +877,7 @@ export default function HostDashboardPage() {
     { id: "studio", label: "Studio" },
     { id: "access", label: "Access" },
     { id: "people", label: "People" },
-    { id: "chat", label: "Chat" }
+    { id: "chat", label: unreadChatCount ? `Chat (${unreadChatCount})` : "Chat" }
   ];
 
   return (
@@ -965,7 +992,7 @@ export default function HostDashboardPage() {
               className={activeTab === "chat" ? "studio-nav-button active" : "studio-nav-button"}
               onClick={() => setActiveTab("chat")}
             >
-              <strong>Chat</strong>
+              <strong>{unreadChatCount ? `Chat (${unreadChatCount})` : "Chat"}</strong>
               <span>Coordinate with listeners inside the room</span>
             </button>
           </div>

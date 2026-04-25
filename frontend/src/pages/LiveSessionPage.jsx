@@ -49,6 +49,7 @@ export default function LiveSessionPage() {
   );
   const [isLeaving, setIsLeaving] = useState(false);
   const [activeTab, setActiveTab] = useState("player");
+  const [unreadChatCount, setUnreadChatCount] = useState(0);
 
   useNavigationLock(
     !isLeaving && status !== "Session ended" && status !== "Unavailable",
@@ -75,9 +76,35 @@ export default function LiveSessionPage() {
         return current;
       }
 
+      if (activeTab !== "chat") {
+        setUnreadChatCount((count) => count + 1);
+      }
+
       return [message, ...current].slice(0, 20);
     });
   }
+
+  useEffect(() => {
+    if (activeTab === "chat" && unreadChatCount) {
+      setUnreadChatCount(0);
+    }
+  }, [activeTab, unreadChatCount]);
+
+  useEffect(() => {
+    if (typeof document !== "undefined") {
+      document.title = unreadChatCount
+        ? `(${unreadChatCount}) TOGETHER | Listen Together. Instantly.`
+        : "TOGETHER | Listen Together. Instantly.";
+    }
+
+    if ("setAppBadge" in navigator) {
+      if (unreadChatCount > 0) {
+        navigator.setAppBadge(unreadChatCount).catch(() => {});
+      } else if ("clearAppBadge" in navigator) {
+        navigator.clearAppBadge().catch(() => {});
+      }
+    }
+  }, [unreadChatCount]);
 
   async function attemptPlaybackResume(reason) {
     if (!audioRef.current?.srcObject || awaitingGestureRef.current) {
@@ -358,13 +385,27 @@ export default function LiveSessionPage() {
       attemptPlaybackResume("page restored");
     }
 
+    function handleBlur() {
+      syncMediaSession("playing");
+      attemptPlaybackResume("window blurred");
+    }
+
+    function handlePageHide() {
+      syncMediaSession("playing");
+      attemptPlaybackResume("page hidden");
+    }
+
     document.addEventListener("visibilitychange", handleVisibilityChange);
     window.addEventListener("pageshow", handlePageShow);
+    window.addEventListener("blur", handleBlur);
+    window.addEventListener("pagehide", handlePageHide);
 
     return () => {
       isCancelled = true;
       document.removeEventListener("visibilitychange", handleVisibilityChange);
       window.removeEventListener("pageshow", handlePageShow);
+      window.removeEventListener("blur", handleBlur);
+      window.removeEventListener("pagehide", handlePageHide);
 
       if (pollingRef.current) {
         clearTimeout(pollingRef.current);
@@ -658,7 +699,7 @@ export default function LiveSessionPage() {
               className={activeTab === "chat" ? "mobile-tab-button active" : "mobile-tab-button"}
               onClick={() => setActiveTab("chat")}
             >
-              Chat
+              {unreadChatCount ? `Chat (${unreadChatCount})` : "Chat"}
             </button>
           </div>
 
@@ -701,7 +742,7 @@ export default function LiveSessionPage() {
               className={activeTab === "chat" ? "studio-nav-button active" : "studio-nav-button"}
               onClick={() => setActiveTab("chat")}
             >
-              <strong>Chat</strong>
+              <strong>{unreadChatCount ? `Chat (${unreadChatCount})` : "Chat"}</strong>
               <span>Message the host or the whole room</span>
             </button>
           </div>

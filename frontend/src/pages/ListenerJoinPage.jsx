@@ -7,10 +7,12 @@ import { fetchSession } from "../lib/api";
 import { createAppId } from "../lib/ids";
 import { normalizeRoomId, sanitizeDisplayName } from "../lib/sanitize";
 import { getListenerSession, saveListenerSession } from "../lib/storage";
+import { useCompactViewport } from "../lib/useCompactViewport";
 
 export default function ListenerJoinPage() {
   const { roomId } = useParams();
   const navigate = useNavigate();
+  const isCompactViewport = useCompactViewport();
   const videoRef = useRef(null);
   const canvasRef = useRef(null);
   const imageInputRef = useRef(null);
@@ -91,7 +93,7 @@ export default function ListenerJoinPage() {
       stopScanner();
       setManualRoomId(normalizedRoom);
       setIsJoining(true);
-      window.location.assign(`${window.location.origin}/join/${normalizedRoom}`);
+      navigate(`/join/${normalizedRoom}`);
       return true;
     }
 
@@ -253,7 +255,7 @@ export default function ListenerJoinPage() {
       }
 
       setIsJoining(true);
-      window.location.assign(`${window.location.origin}/join/${nextRoomId}`);
+      navigate(`/join/${nextRoomId}`);
       return;
     }
 
@@ -269,7 +271,7 @@ export default function ListenerJoinPage() {
         hostId: room?.hostId || ""
       });
 
-      window.location.assign(`${window.location.origin}/listen/${roomId}`);
+      navigate(`/listen/${roomId}`);
     } catch (_joinError) {
       setIsJoining(false);
       setStatus("Room ready");
@@ -279,7 +281,7 @@ export default function ListenerJoinPage() {
 
   return (
     <AppShell>
-      <section className="center-card workspace-card fade-in join-shell">
+      <section className={isCompactViewport ? "center-card workspace-card fade-in join-shell join-shell-mobile" : "center-card workspace-card fade-in join-shell"}>
         <div className="join-header">
           <div>
             <StatusBadge tone={error ? "danger" : "success"}>{status}</StatusBadge>
