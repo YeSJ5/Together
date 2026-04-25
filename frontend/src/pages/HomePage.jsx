@@ -7,7 +7,7 @@ export default function HomePage() {
       <section className="hero-card home-hero fade-in">
         <div className="hero-copy hero-copy-wide">
           <p className="eyebrow">TOGETHER</p>
-          <h1>Share a room. Start the sound. Bring everyone in fast.</h1>
+          <h1>Host live audio. Let everyone listen instantly.</h1>
           <p className="hero-text">
             TOGETHER lets one device host a live audio session and everyone else join with a single link or QR scan.
             It works for classrooms, events, study rooms, collaborative viewing, voice sharing, and group listening on
