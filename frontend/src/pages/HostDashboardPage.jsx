@@ -781,6 +781,31 @@ export default function HostDashboardPage() {
         </button>
       </div>
 
+      {audioSourceMode === "audio-file" ? (
+        <div className="file-host-panel">
+          <label className="file-picker" htmlFor="audio-file-input">
+            Choose audio file
+          </label>
+          <input
+            id="audio-file-input"
+            className="file-input"
+            type="file"
+            accept="audio/*"
+            onChange={(event) => {
+              setSelectedAudioFile(event.target.files?.[0] || null);
+            }}
+          />
+          <p className="subtle-text">
+            Pick a song, lecture clip, or podcast file from your device and TOGETHER will stream it live to listeners.
+          </p>
+          <p className="subtle-text">
+            {selectedAudioFile
+              ? `Selected file: ${selectedAudioFile.name}`
+              : "No audio file selected yet."}
+          </p>
+        </div>
+      ) : null}
+
       <input
         className="text-input"
         placeholder="Host name"
@@ -804,31 +829,6 @@ export default function HostDashboardPage() {
           <p>Best for phones or portable hosting when you want a predictable, stable audio source.</p>
         </div>
       </div>
-
-      {audioSourceMode === "audio-file" ? (
-        <div className="file-host-panel">
-          <label className="file-picker" htmlFor="audio-file-input">
-            Choose audio file
-          </label>
-          <input
-            id="audio-file-input"
-            className="file-input"
-            type="file"
-            accept="audio/*"
-            onChange={(event) => {
-              setSelectedAudioFile(event.target.files?.[0] || null);
-            }}
-          />
-          <p className="subtle-text">
-            Best mobile fallback: pick a song, lecture clip, or podcast file from your phone and TOGETHER will stream it live to listeners.
-          </p>
-          <p className="subtle-text">
-            {selectedAudioFile
-              ? `Selected file: ${selectedAudioFile.name}`
-              : "No audio file selected yet."}
-          </p>
-        </div>
-      ) : null}
 
       {isMobileHost ? (
         <p className="subtle-text">
@@ -1129,10 +1129,35 @@ export default function HostDashboardPage() {
                   type="button"
                   className={audioSourceMode === "audio-file" ? "chip active" : "chip"}
                   onClick={() => setAudioSourceMode("audio-file")}
-                >
-                  Audio File
-                </button>
+              >
+                Audio File
+              </button>
+            </div>
+
+            {audioSourceMode === "audio-file" ? (
+              <div className="file-host-panel">
+                <label className="file-picker" htmlFor="audio-file-input">
+                  Choose audio file
+                </label>
+                <input
+                  id="audio-file-input"
+                  className="file-input"
+                  type="file"
+                  accept="audio/*"
+                  onChange={(event) => {
+                    setSelectedAudioFile(event.target.files?.[0] || null);
+                  }}
+                />
+                <p className="subtle-text">
+                  Pick a song, lecture clip, or podcast file from your device and TOGETHER will stream it live to listeners.
+                </p>
+                <p className="subtle-text">
+                  {selectedAudioFile
+                    ? `Selected file: ${selectedAudioFile.name}`
+                    : "No audio file selected yet."}
+                </p>
               </div>
+            ) : null}
 
               <input
                 className="text-input"
@@ -1157,31 +1182,6 @@ export default function HostDashboardPage() {
                   <p>Best for phones or portable hosting when you want a predictable, stable audio source.</p>
                 </div>
               </div>
-
-              {audioSourceMode === "audio-file" ? (
-                <div className="file-host-panel">
-                  <label className="file-picker" htmlFor="audio-file-input">
-                    Choose audio file
-                  </label>
-                  <input
-                    id="audio-file-input"
-                    className="file-input"
-                    type="file"
-                    accept="audio/*"
-                    onChange={(event) => {
-                      setSelectedAudioFile(event.target.files?.[0] || null);
-                    }}
-                  />
-                  <p className="subtle-text">
-                    Best mobile fallback: pick a song, lecture clip, or podcast file from your phone and TOGETHER will stream it live to listeners.
-                  </p>
-                  <p className="subtle-text">
-                    {selectedAudioFile
-                      ? `Selected file: ${selectedAudioFile.name}`
-                      : "No audio file selected yet."}
-                  </p>
-                </div>
-              ) : null}
 
               {isMobileHost ? (
                 <p className="subtle-text">

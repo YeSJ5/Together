@@ -51,10 +51,15 @@ export default function ListenerJoinPage() {
       setRoom(null);
       setStatus("Enter room ID");
       setError("");
+      setIsJoining(false);
       return () => {};
     }
 
     let isMounted = true;
+    setRoom(null);
+    setError("");
+    setStatus("Checking room");
+    setIsJoining(false);
 
     fetchSession(roomId)
       .then((data) => {
@@ -291,36 +296,35 @@ export default function ListenerJoinPage() {
             Fast entry for live rooms, whether you scanned a QR, opened a shared link, or entered the room manually.
           </p>
         </div>
-        {error ? (
-          <p className="error-banner">{error}</p>
-        ) : (
-          <>
-            {roomId ? (
-              <>
-                <div className="join-room-summary">
-                  <div className="workspace-stat">
-                    <span>Room</span>
-                    <strong>{roomId}</strong>
-                  </div>
-                  <div className="workspace-stat">
-                    <span>Source</span>
-                    <strong>
-                      {room?.audioSourceMode === "microphone"
-                        ? "Microphone"
-                        : room?.audioSourceMode === "audio-file"
-                          ? "Audio File"
-                          : "Device Audio"}
-                    </strong>
-                  </div>
-                  <div className="workspace-stat">
-                    <span>Listeners online</span>
-                    <strong>{room?.users?.length || 0}</strong>
-                  </div>
+        {error ? <p className="error-banner">{error}</p> : null}
+
+        {roomId ? (
+          room ? (
+            <>
+              <div className="join-room-summary">
+                <div className="workspace-stat">
+                  <span>Room</span>
+                  <strong>{roomId}</strong>
                 </div>
-                <div className="join-room-card">
-                  <p className="hero-text compact">
-                    You are entering room <strong>{roomId}</strong>. Add a name if you want other people in the room to recognize you.
-                  </p>
+                <div className="workspace-stat">
+                  <span>Source</span>
+                  <strong>
+                    {room.audioSourceMode === "microphone"
+                      ? "Microphone"
+                      : room.audioSourceMode === "audio-file"
+                        ? "Audio File"
+                        : "Device Audio"}
+                  </strong>
+                </div>
+                <div className="workspace-stat">
+                  <span>Listeners online</span>
+                  <strong>{room.users?.length || 0}</strong>
+                </div>
+              </div>
+              <div className="join-room-card">
+                <p className="hero-text compact">
+                  You are entering room <strong>{roomId}</strong>. Add a name if you want other people in the room to recognize you.
+                </p>
                 <input
                   className="text-input"
                   placeholder="Your name (optional)"
@@ -328,129 +332,150 @@ export default function ListenerJoinPage() {
                   maxLength={32}
                   onChange={(event) => setUsername(sanitizeDisplayName(event.target.value, ""))}
                 />
+                <button
+                  type="button"
+                  className="button-primary large-button"
+                  onClick={handleJoin}
+                  disabled={isJoining}
+                >
+                  {isJoining ? "Opening..." : savedListener?.roomId === roomId ? "Resume Audio" : "Join Audio"}
+                </button>
+              </div>
+            </>
+          ) : (
+            <div className="join-room-card">
+              <p className="hero-text compact">
+                We could not open that room right now. You can retry the same link or go back to manual join.
+              </p>
+              <div className="button-row">
+                <button
+                  type="button"
+                  className="button-primary"
+                  onClick={() => navigate(`/join/${roomId}`)}
+                >
+                  Retry room
+                </button>
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={() => navigate("/join")}
+                >
+                  Join another room
+                </button>
+              </div>
+            </div>
+          )
+        ) : (
+          <>
+            <div className="app-tabs join-tabs" role="tablist" aria-label="Join methods">
+              <button
+                type="button"
+                className={activeJoinTab === "scan" ? "app-tab active" : "app-tab"}
+                onClick={() => setActiveJoinTab("scan")}
+              >
+                Scan
+              </button>
+              <button
+                type="button"
+                className={activeJoinTab === "photo" ? "app-tab active" : "app-tab"}
+                onClick={() => setActiveJoinTab("photo")}
+              >
+                Photo
+              </button>
+              <button
+                type="button"
+                className={activeJoinTab === "manual" ? "app-tab active" : "app-tab"}
+                onClick={() => setActiveJoinTab("manual")}
+              >
+                Room ID
+              </button>
+            </div>
+
+            <div className="join-panel">
+              {activeJoinTab === "scan" ? (
+                <div className="join-mode-card">
+                  <p className="hero-text compact">
+                    Open the camera directly and point it at the host QR code.
+                  </p>
+                  <button
+                    type="button"
+                    className="button-primary large-button"
+                    onClick={handleStartScanner}
+                    disabled={isJoining || isScanning}
+                  >
+                    {isScanning ? "Scanning QR..." : "Open Scanner"}
+                  </button>
+                  {!scannerSupported ? (
+                    <p className="subtle-text">
+                      Live scanning depends on browser camera support. You can still use a camera photo or room code.
+                    </p>
+                  ) : null}
+                  {isScanning ? (
+                    <div className="scanner-card">
+                      <video ref={videoRef} className="scanner-video" playsInline muted />
+                      <canvas ref={canvasRef} className="scanner-canvas" />
+                      <p className="subtle-text">{scanStatus}</p>
+                      <button
+                        type="button"
+                        className="button-secondary"
+                        onClick={stopScanner}
+                      >
+                        Stop Scanner
+                      </button>
+                    </div>
+                  ) : null}
+                </div>
+              ) : null}
+
+              {activeJoinTab === "photo" ? (
+                <div className="join-mode-card">
+                  <p className="hero-text compact">
+                    Use a screenshot or a quick camera photo of the host QR if live scanning is awkward on your device.
+                  </p>
+                  <button
+                    type="button"
+                    className="button-primary large-button"
+                    onClick={handleCaptureFallback}
+                    disabled={isJoining}
+                  >
+                    Use Camera Photo
+                  </button>
+                  <input
+                    ref={imageInputRef}
+                    type="file"
+                    accept="image/*"
+                    capture="environment"
+                    className="scanner-input"
+                    onChange={handleQrImagePick}
+                  />
+                  <canvas ref={canvasRef} className="scanner-canvas" />
+                  {scanStatus ? <p className="subtle-text">{scanStatus}</p> : null}
+                </div>
+              ) : null}
+
+              {activeJoinTab === "manual" ? (
+                <div className="join-mode-card">
+                  <p className="hero-text compact">
+                    Enter the room code exactly as shared by the host.
+                  </p>
+                  <input
+                    className="text-input"
+                    placeholder="Enter room ID"
+                    value={manualRoomId}
+                    maxLength={16}
+                    onChange={(event) => setManualRoomId(normalizeRoomId(event.target.value))}
+                  />
                   <button
                     type="button"
                     className="button-primary large-button"
                     onClick={handleJoin}
                     disabled={isJoining}
                   >
-                    {isJoining ? "Opening..." : savedListener?.roomId === roomId ? "Resume Audio" : "Join Audio"}
+                    {isJoining ? "Opening..." : "Continue"}
                   </button>
                 </div>
-              </>
-            ) : (
-              <>
-                <div className="app-tabs join-tabs" role="tablist" aria-label="Join methods">
-                  <button
-                    type="button"
-                    className={activeJoinTab === "scan" ? "app-tab active" : "app-tab"}
-                    onClick={() => setActiveJoinTab("scan")}
-                  >
-                    Scan
-                  </button>
-                  <button
-                    type="button"
-                    className={activeJoinTab === "photo" ? "app-tab active" : "app-tab"}
-                    onClick={() => setActiveJoinTab("photo")}
-                  >
-                    Photo
-                  </button>
-                  <button
-                    type="button"
-                    className={activeJoinTab === "manual" ? "app-tab active" : "app-tab"}
-                    onClick={() => setActiveJoinTab("manual")}
-                  >
-                    Room ID
-                  </button>
-                </div>
-
-                <div className="join-panel">
-                  {activeJoinTab === "scan" ? (
-                    <div className="join-mode-card">
-                      <p className="hero-text compact">
-                        Open the camera directly and point it at the host QR code.
-                      </p>
-                      <button
-                        type="button"
-                        className="button-primary large-button"
-                        onClick={handleStartScanner}
-                        disabled={isJoining || isScanning}
-                      >
-                        {isScanning ? "Scanning QR..." : "Open Scanner"}
-                      </button>
-                      {!scannerSupported ? (
-                        <p className="subtle-text">
-                          Live scanning depends on browser camera support. You can still use a camera photo or room code.
-                        </p>
-                      ) : null}
-                      {isScanning ? (
-                        <div className="scanner-card">
-                          <video ref={videoRef} className="scanner-video" playsInline muted />
-                          <canvas ref={canvasRef} className="scanner-canvas" />
-                          <p className="subtle-text">{scanStatus}</p>
-                          <button
-                            type="button"
-                            className="button-secondary"
-                            onClick={stopScanner}
-                          >
-                            Stop Scanner
-                          </button>
-                        </div>
-                      ) : null}
-                    </div>
-                  ) : null}
-
-                  {activeJoinTab === "photo" ? (
-                    <div className="join-mode-card">
-                      <p className="hero-text compact">
-                        Use a screenshot or a quick camera photo of the host QR if live scanning is awkward on your device.
-                      </p>
-                      <button
-                        type="button"
-                        className="button-primary large-button"
-                        onClick={handleCaptureFallback}
-                        disabled={isJoining}
-                      >
-                        Use Camera Photo
-                      </button>
-                      <input
-                        ref={imageInputRef}
-                        type="file"
-                        accept="image/*"
-                        capture="environment"
-                        className="scanner-input"
-                        onChange={handleQrImagePick}
-                      />
-                      <canvas ref={canvasRef} className="scanner-canvas" />
-                      {scanStatus ? <p className="subtle-text">{scanStatus}</p> : null}
-                    </div>
-                  ) : null}
-
-                  {activeJoinTab === "manual" ? (
-                    <div className="join-mode-card">
-                      <p className="hero-text compact">
-                        Enter the room code exactly as shared by the host.
-                      </p>
-                      <input
-                        className="text-input"
-                        placeholder="Enter room ID"
-                        value={manualRoomId}
-                        maxLength={16}
-                        onChange={(event) => setManualRoomId(normalizeRoomId(event.target.value))}
-                      />
-                      <button
-                        type="button"
-                        className="button-primary large-button"
-                        onClick={handleJoin}
-                        disabled={isJoining}
-                      >
-                        {isJoining ? "Opening..." : "Continue"}
-                      </button>
-                    </div>
-                  ) : null}
-                </div>
-              </>
-            )}
+              ) : null}
+            </div>
           </>
         )}
       </section>
