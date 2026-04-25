@@ -40,10 +40,30 @@ public class TogetherAudioPlugin extends Plugin implements TogetherAudioManager.
 
     @PluginMethod
     public void enableBackgroundPlayback(PluginCall call) {
+        String title = call.getString("title", "TOGETHER audio active");
+        String text = call.getString("text", "Background playback mode is enabled.");
+        boolean playing = call.getBoolean("playing", true);
+
         TogetherPlaybackService.startForegroundService(
             getContext(),
-            "TOGETHER audio active",
-            "Background playback mode is enabled."
+            title,
+            text,
+            playing
+        );
+        call.resolve();
+    }
+
+    @PluginMethod
+    public void updateBackgroundPlayback(PluginCall call) {
+        String title = call.getString("title", "TOGETHER audio active");
+        String text = call.getString("text", "Background playback mode is enabled.");
+        boolean playing = call.getBoolean("playing", true);
+
+        TogetherPlaybackService.updateForegroundService(
+            getContext(),
+            title,
+            text,
+            playing
         );
         call.resolve();
     }

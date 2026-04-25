@@ -45,12 +45,24 @@ export async function getNativeAudioCapabilities() {
   return TogetherAudio.getCapabilities();
 }
 
-export async function enableNativeBackgroundPlayback() {
+export async function enableNativeBackgroundPlayback(options = {}) {
+  return enableNativeBackgroundPlaybackState({
+    title: options.title || "TOGETHER audio active",
+    text: options.text || "Background playback mode is enabled.",
+    playing: typeof options.playing === "boolean" ? options.playing : true
+  });
+}
+
+export async function enableNativeBackgroundPlaybackState({ title, text, playing = true }) {
   if (!isNativeAndroidApp()) {
     return;
   }
 
-  await TogetherAudio.enableBackgroundPlayback();
+  await TogetherAudio.enableBackgroundPlayback({
+    title,
+    text,
+    playing
+  });
 }
 
 export async function disableNativeBackgroundPlayback() {
@@ -59,6 +71,18 @@ export async function disableNativeBackgroundPlayback() {
   }
 
   await TogetherAudio.disableBackgroundPlayback();
+}
+
+export async function updateNativeBackgroundPlaybackState({ title, text, playing = true }) {
+  if (!isNativeAndroidApp()) {
+    return;
+  }
+
+  await TogetherAudio.updateBackgroundPlayback({
+    title,
+    text,
+    playing
+  });
 }
 
 export async function startNativeSystemAudioBridge() {

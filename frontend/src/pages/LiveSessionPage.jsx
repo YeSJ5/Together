@@ -14,6 +14,7 @@ import { connectListenerToLiveKitRoom, isLiveKitSession } from "../lib/livekitRo
 import {
   disableNativeBackgroundPlayback,
   enableNativeBackgroundPlayback,
+  updateNativeBackgroundPlaybackState,
   isNativeAndroidApp
 } from "../lib/nativeAudio";
 import { sanitizeChatMessage } from "../lib/sanitize";
@@ -173,6 +174,23 @@ export default function LiveSessionPage() {
     }
   }
 
+  function syncNativePlaybackState(nextStatus, detailText) {
+    if (!isNativeAndroidApp()) {
+      return;
+    }
+
+    const defaultText =
+      nextStatus === "playing"
+        ? `Room ${roomId} is playing in the background.`
+        : `Room ${roomId} is ready to resume.`;
+
+    updateNativeBackgroundPlaybackState({
+      title: "TOGETHER live audio",
+      text: detailText || defaultText,
+      playing: nextStatus === "playing"
+    }).catch(() => {});
+  }
+
   useEffect(() => {
     const listener = getListenerSession();
 
@@ -188,7 +206,11 @@ export default function LiveSessionPage() {
 
     requestWakeLock();
     if (isNativeAndroidApp()) {
-      enableNativeBackgroundPlayback().catch(() => {});
+      enableNativeBackgroundPlayback({
+        title: "TOGETHER live audio",
+        text: `Room ${roomId} is connecting.`,
+        playing: false
+      }).catch(() => {});
     }
     pushDiagnostic("Listener ready");
     let isCancelled = false;
@@ -225,12 +247,14 @@ export default function LiveSessionPage() {
             "Connected. If playback pauses after app switching, return to this page and tap play once."
           );
           syncMediaSession("playing");
+          syncNativePlaybackState("playing", `Room ${roomId} is now playing.`);
           pushDiagnostic("Playback started successfully");
         } catch (_playbackError) {
           setStatus("Tap play to start audio");
           updateAwaitingGesture(true);
           setSessionNote("Your phone wants a tap before live audio can start. Tap the button once to continue.");
           syncMediaSession("paused");
+          syncNativePlaybackState("paused", `Room ${roomId} is waiting for you to tap play.`);
           pushDiagnostic("Playback blocked until user taps play");
         }
       }
@@ -382,6 +406,7 @@ export default function LiveSessionPage() {
             updateAwaitingGesture(false);
             setSessionNote("Connected. Your device is now playing the host audio.");
             syncMediaSession("playing");
+            syncNativePlaybackState("playing", `Room ${roomId} is now playing.`);
             pushDiagnostic("Playback started successfully");
           },
           onPlaybackBlocked: () => {
@@ -391,6 +416,7 @@ export default function LiveSessionPage() {
               "Your phone wants a tap before live audio can start. Tap the button once to continue."
             );
             syncMediaSession("paused");
+            syncNativePlaybackState("paused", `Room ${roomId} is waiting for you to tap play.`);
             pushDiagnostic("Playback blocked until user taps play");
           }
         });
@@ -438,6 +464,7 @@ export default function LiveSessionPage() {
 
       if (document.visibilityState === "hidden") {
         syncMediaSession("playing");
+        syncNativePlaybackState("playing");
         attemptPlaybackResume("app moved to background");
         return;
       }
@@ -455,11 +482,13 @@ export default function LiveSessionPage() {
 
     function handleBlur() {
       syncMediaSession("playing");
+      syncNativePlaybackState("playing");
       attemptPlaybackResume("window blurred");
     }
 
     function handlePageHide() {
       syncMediaSession("playing");
+      syncNativePlaybackState("playing");
       attemptPlaybackResume("page hidden");
     }
 
@@ -528,11 +557,13 @@ export default function LiveSessionPage() {
       updateAwaitingGesture(false);
       setSessionNote("Connected. Your device is now playing the host audio.");
       syncMediaSession("playing");
+      syncNativePlaybackState("playing", `Room ${roomId} is now playing.`);
       pushDiagnostic("Manual play succeeded");
     } catch (_playError) {
       setError("Audio playback is blocked. Please allow media playback in your browser.");
       setSessionNote("Your browser is still blocking live audio playback.");
       syncMediaSession("paused");
+      syncNativePlaybackState("paused", `Room ${roomId} is waiting to resume.`);
       pushDiagnostic("Manual play failed");
     }
   }
