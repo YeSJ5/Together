@@ -6,6 +6,7 @@ const path = require("path");
 const cors = require("cors");
 const { Server } = require("socket.io");
 const { ALLOWED_ORIGINS, PORT } = require("./config");
+const { createLiveKitToken, getLiveKitConfig, getLiveKitRoomName } = require("./livekit");
 const {
   createSession,
   deleteSession,
@@ -85,6 +86,21 @@ app.get("/api/health", (_request, response) => {
   });
 });
 
+app.get("/api/realtime-config", (_request, response) => {
+  response.json({
+    product: "TOGETHER",
+    transport: {
+      defaultMode: "webrtc-direct",
+      liveKit: getLiveKitConfig()
+    },
+    mobile: {
+      nativeBackgroundAudioRequired: true,
+      iosRequiresNativeApp: true,
+      androidNativeRecommended: true
+    }
+  });
+});
+
 app.get("/api/runtime", (request, response) => {
   const forwardedProtocol = request.headers["x-forwarded-proto"];
   const protocol = forwardedProtocol || request.protocol || "http";
@@ -98,7 +114,7 @@ app.get("/api/runtime", (request, response) => {
 });
 
 app.post("/create-session", (request, response) => {
-  const { hostId, hostName, audioSourceMode } = request.body || {};
+  const { hostId, hostName, audioSourceMode, preferredTransport } = request.body || {};
 
   if (!hostId) {
     return response.status(400).json({
@@ -106,8 +122,78 @@ app.post("/create-session", (request, response) => {
     });
   }
 
-  const session = createSession({ hostId, hostName, audioSourceMode });
+  const liveKitConfig = getLiveKitConfig();
+  const useLiveKit = preferredTransport === "livekit" && liveKitConfig.enabled;
+  let session = createSession({
+    hostId,
+    hostName,
+    audioSourceMode,
+    mediaBackend: useLiveKit ? "livekit" : "webrtc-direct",
+    nativeMobileRecommended: true,
+    liveKitRoomName: null
+  });
+
+  if (useLiveKit) {
+    session = updateSession(session.roomId, (draft) => {
+      draft.liveKitRoomName = getLiveKitRoomName(session.roomId);
+    });
+  }
+
   return response.status(201).json(session);
+});
+
+app.post("/session/:id/livekit-token", async (request, response) => {
+  const session = getRawSession(request.params.id);
+  const {
+    participantId,
+    participantName,
+    role = "listener",
+    canPublish,
+    canSubscribe,
+    canPublishData
+  } = request.body || {};
+
+  if (!session) {
+    return response.status(404).json({
+      message: "Session not found or expired."
+    });
+  }
+
+  if (!participantId) {
+    return response.status(400).json({
+      message: "participantId is required."
+    });
+  }
+
+  try {
+    const tokenPayload = await createLiveKitToken({
+      roomId: session.roomId,
+      participantId,
+      participantName,
+      role,
+      canPublish:
+        typeof canPublish === "boolean"
+          ? canPublish
+          : role === "host" || role === "speaker",
+      canSubscribe:
+        typeof canSubscribe === "boolean"
+          ? canSubscribe
+          : true,
+      canPublishData:
+        typeof canPublishData === "boolean"
+          ? canPublishData
+          : true
+    });
+
+    return response.json({
+      ...tokenPayload,
+      mediaBackend: "livekit"
+    });
+  } catch (error) {
+    return response.status(503).json({
+      message: error.message || "LiveKit token could not be created."
+    });
+  }
 });
 
 app.get("/session/:id", (request, response) => {

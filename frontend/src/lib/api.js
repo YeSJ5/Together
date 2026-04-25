@@ -115,3 +115,24 @@ export async function endSession(roomId) {
 
   return handleResponse(response);
 }
+
+export async function fetchRealtimeConfig() {
+  const response = await fetch(`${API_BASE_URL}/api/realtime-config`, {
+    cache: "no-store"
+  });
+
+  return handleResponse(response);
+}
+
+export async function createLiveKitToken(roomId, payload) {
+  const response = await fetch(`${API_BASE_URL}/session/${roomId}/livekit-token`, {
+    method: "POST",
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  return handleResponse(response);
+}

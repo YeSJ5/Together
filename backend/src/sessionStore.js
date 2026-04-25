@@ -33,11 +33,21 @@ function sanitizeSession(session) {
     users: session.users,
     createdAt: session.createdAt,
     status: session.status,
-    audioSourceMode: session.audioSourceMode
+    audioSourceMode: session.audioSourceMode,
+    mediaBackend: session.mediaBackend,
+    nativeMobileRecommended: session.nativeMobileRecommended,
+    liveKitRoomName: session.liveKitRoomName || null
   };
 }
 
-function createSession({ hostId, hostName = "Host", audioSourceMode = "device-audio" }) {
+function createSession({
+  hostId,
+  hostName = "Host",
+  audioSourceMode = "device-audio",
+  mediaBackend = "webrtc-direct",
+  nativeMobileRecommended = false,
+  liveKitRoomName = null
+}) {
   const roomId = generateUniqueRoomId();
   const session = {
     roomId,
@@ -47,6 +57,9 @@ function createSession({ hostId, hostName = "Host", audioSourceMode = "device-au
     createdAt: Date.now(),
     status: "active",
     audioSourceMode,
+    mediaBackend,
+    nativeMobileRecommended,
+    liveKitRoomName,
     events: [],
     nextEventId: 1
   };

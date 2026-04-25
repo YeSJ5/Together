@@ -53,3 +53,5 @@ export const PUBLIC_APP_URL =
   (typeof window === "undefined"
     ? "https://together-puce.vercel.app"
     : window.location.origin);
+
+export const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL || "";
