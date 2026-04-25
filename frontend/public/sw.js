@@ -1,4 +1,4 @@
-const APP_CACHE = "together-shell-v3";
+const APP_CACHE = "together-shell-v4";
 const APP_SHELL = ["/", "/manifest.webmanifest", "/icon-192.svg", "/icon-512.svg"];
 
 self.addEventListener("install", (event) => {
@@ -10,9 +10,12 @@ self.addEventListener("install", (event) => {
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((keys) =>
-      Promise.all(keys.filter((key) => key !== APP_CACHE).map((key) => caches.delete(key)))
-    )
+    Promise.all([
+      caches.keys().then((keys) =>
+        Promise.all(keys.filter((key) => key !== APP_CACHE).map((key) => caches.delete(key)))
+      ),
+      self.registration.navigationPreload?.enable?.().catch(() => {})
+    ])
   );
   self.clients.claim();
 });
@@ -35,7 +38,19 @@ self.addEventListener("fetch", (event) => {
 
   if (request.mode === "navigate") {
     event.respondWith(
-      fetch(request).catch(() => caches.match("/") || Response.error())
+      (async () => {
+        try {
+          const preloadResponse = await event.preloadResponse;
+          if (preloadResponse) {
+            return preloadResponse;
+          }
+
+          const networkResponse = await fetch(request);
+          return networkResponse;
+        } catch (_error) {
+          return caches.match("/") || Response.error();
+        }
+      })()
     );
     return;
   }

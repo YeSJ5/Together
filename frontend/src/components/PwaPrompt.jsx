@@ -1,27 +1,13 @@
 import { useEffect, useMemo, useState } from "react";
+import { isMobileBrowser, isStandaloneDisplay } from "../lib/pwa";
 
-function isMobileBrowser() {
-  if (typeof navigator === "undefined") {
-    return false;
-  }
-
-  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-}
-
-function isStandaloneDisplay() {
-  if (typeof window === "undefined") {
-    return false;
-  }
-
-  return (
-    window.matchMedia?.("(display-mode: standalone)")?.matches ||
-    window.navigator.standalone === true
-  );
-}
+const DISMISS_KEY = "together-pwa-prompt-dismissed";
 
 export default function PwaPrompt() {
   const [installEvent, setInstallEvent] = useState(null);
-  const [dismissed, setDismissed] = useState(false);
+  const [dismissed, setDismissed] = useState(
+    () => localStorage.getItem(DISMISS_KEY) === "1"
+  );
   const isMobile = useMemo(() => isMobileBrowser(), []);
   const isStandalone = useMemo(() => isStandaloneDisplay(), []);
 
@@ -47,6 +33,7 @@ export default function PwaPrompt() {
     await installEvent.userChoice.catch(() => null);
     setInstallEvent(null);
     setDismissed(true);
+    localStorage.setItem(DISMISS_KEY, "1");
   }
 
   if (!isMobile || isStandalone || dismissed) {
@@ -74,7 +61,10 @@ export default function PwaPrompt() {
         <button
           type="button"
           className="button-secondary"
-          onClick={() => setDismissed(true)}
+          onClick={() => {
+            setDismissed(true);
+            localStorage.setItem(DISMISS_KEY, "1");
+          }}
         >
           Hide
         </button>

@@ -17,6 +17,7 @@ import {
   updateNativeBackgroundPlaybackState,
   isNativeAndroidApp
 } from "../lib/nativeAudio";
+import { isInstalledPwaExperience } from "../lib/pwa";
 import { sanitizeChatMessage } from "../lib/sanitize";
 import { clearListenerSession, getListenerSession } from "../lib/storage";
 import { useCompactViewport } from "../lib/useCompactViewport";
@@ -34,6 +35,10 @@ export default function LiveSessionPage() {
   const liveKitSessionRef = useRef(null);
   const latestEventIdRef = useRef(0);
   const wakeLockRef = useRef(null);
+  const playbackWatchdogRef = useRef(null);
+  const lastPlaybackAtRef = useRef(Date.now());
+  const lastTrackAtRef = useRef(0);
+  const lastRecoveryAtRef = useRef(0);
   const connectedRef = useRef(false);
   const awaitingGestureRef = useRef(false);
   const hiddenRef = useRef(false);
@@ -67,6 +72,10 @@ export default function LiveSessionPage() {
   function updateConnected(nextConnected) {
     connectedRef.current = nextConnected;
     setConnected(nextConnected);
+
+    if (nextConnected) {
+      lastPlaybackAtRef.current = Date.now();
+    }
   }
 
   function updateAwaitingGesture(nextAwaitingGesture) {
@@ -117,7 +126,9 @@ export default function LiveSessionPage() {
 
     try {
       await audioRef.current.play();
+      lastPlaybackAtRef.current = Date.now();
       syncMediaSession("playing");
+      syncNativePlaybackState("playing", `Room ${roomId} is playing in the background.`);
       pushDiagnostic(`Playback confirmed: ${reason}`);
     } catch (_error) {
       pushDiagnostic(`Playback resume blocked: ${reason}`);
@@ -191,6 +202,21 @@ export default function LiveSessionPage() {
     }).catch(() => {});
   }
 
+  function triggerPwaRecovery(reason) {
+    const now = Date.now();
+
+    if (!isInstalledPwaExperience() || now - lastRecoveryAtRef.current < 20000) {
+      return;
+    }
+
+    lastRecoveryAtRef.current = now;
+    setError("");
+    setStatus("Reconnecting");
+    setSessionNote("Restoring the live stream after the app was suspended.");
+    pushDiagnostic(`Recovery triggered: ${reason}`);
+    window.location.reload();
+  }
+
   useEffect(() => {
     const listener = getListenerSession();
 
@@ -233,6 +259,7 @@ export default function LiveSessionPage() {
         }
 
         audioRef.current.srcObject = stream;
+        lastTrackAtRef.current = Date.now();
         pushDiagnostic("Audio track received on listener");
         setStatus("Ready to play");
         setSessionNote("The host audio reached your device. If playback does not start, tap the play button once.");
@@ -240,6 +267,7 @@ export default function LiveSessionPage() {
         try {
           await audioRef.current.play();
           updateConnected(true);
+          lastPlaybackAtRef.current = Date.now();
           setError("");
           setStatus("Live");
           updateAwaitingGesture(false);
@@ -393,6 +421,7 @@ export default function LiveSessionPage() {
             pushDiagnostic(message);
           },
           onAudioTrack: () => {
+            lastTrackAtRef.current = Date.now();
             pushDiagnostic("Audio track received on listener");
             setStatus("Ready to play");
             setSessionNote(
@@ -401,6 +430,7 @@ export default function LiveSessionPage() {
           },
           onPlaybackStarted: () => {
             updateConnected(true);
+            lastPlaybackAtRef.current = Date.now();
             setError("");
             setStatus("Live");
             updateAwaitingGesture(false);
@@ -459,6 +489,39 @@ export default function LiveSessionPage() {
 
     pollRoomState();
 
+    playbackWatchdogRef.current = window.setInterval(() => {
+      const audio = audioRef.current;
+
+      if (!audio || awaitingGestureRef.current) {
+        return;
+      }
+
+      if (audio.srcObject && !audio.paused && !audio.ended) {
+        lastPlaybackAtRef.current = Date.now();
+        return;
+      }
+
+      const now = Date.now();
+      const hasRecentTrack = now - lastTrackAtRef.current < 20000;
+      const playbackStalled =
+        connectedRef.current &&
+        hasRecentTrack &&
+        now - lastPlaybackAtRef.current > 10000;
+
+      if (playbackStalled) {
+        attemptPlaybackResume("watchdog resume");
+      }
+
+      if (
+        isInstalledPwaExperience() &&
+        connectedRef.current &&
+        !audio.srcObject &&
+        now - lastPlaybackAtRef.current > 15000
+      ) {
+        triggerPwaRecovery("stream missing after background suspension");
+      }
+    }, 5000);
+
     function handleVisibilityChange() {
       hiddenRef.current = document.visibilityState !== "visible";
 
@@ -512,6 +575,11 @@ export default function LiveSessionPage() {
         clearTimeout(roomPollRef.current);
       }
 
+      if (playbackWatchdogRef.current) {
+        clearInterval(playbackWatchdogRef.current);
+        playbackWatchdogRef.current = null;
+      }
+
       leaveSessionInBackground(roomId, {
         listenerId: listener.listenerId
       });
@@ -552,6 +620,7 @@ export default function LiveSessionPage() {
     try {
       await audioRef.current.play();
       updateConnected(true);
+      lastPlaybackAtRef.current = Date.now();
       setError("");
       setStatus("Live");
       updateAwaitingGesture(false);
