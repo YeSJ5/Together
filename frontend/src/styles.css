@@ -327,19 +327,22 @@ button {
 }
 
 .mode-explainer-grid {
-  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  align-items: stretch;
 }
 
 .mode-explainer {
   min-height: 0;
   padding: 20px 22px;
+  display: grid;
+  align-content: start;
 }
 
 .mode-explainer p {
   margin: 10px 0 0;
   font-size: 1rem;
   line-height: 1.55;
-  max-width: 22ch;
+  max-width: none;
 }
 
 .home-grid {
@@ -503,7 +506,7 @@ button {
 .studio-shell,
 .listener-shell {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1.35fr) minmax(300px, 0.9fr);
+  grid-template-columns: 290px minmax(0, 1.45fr) minmax(320px, 0.95fr);
   gap: 22px;
   align-items: start;
 }
@@ -806,7 +809,7 @@ button {
 }
 
 .panel-heading .mini-caption {
-  max-width: 24ch;
+  max-width: none;
 }
 
 .chat-feed-large {
