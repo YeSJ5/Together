@@ -54,7 +54,7 @@ export default function LiveSessionPage() {
   const [chatInput, setChatInput] = useState("");
   const [chatAudience, setChatAudience] = useState("everyone");
   const [sessionNote, setSessionNote] = useState(
-    "Stay on this page until the stream starts. On many phones, live browser audio is most reliable while the app stays visible."
+    "Tap play, give it a tiny beat, and let the room tune in."
   );
   const [isLeaving, setIsLeaving] = useState(false);
   const [activeTab, setActiveTab] = useState("player");
@@ -262,7 +262,7 @@ export default function LiveSessionPage() {
         lastTrackAtRef.current = Date.now();
         pushDiagnostic("Audio track received on listener");
         setStatus("Ready to play");
-        setSessionNote("The host audio reached your device. If playback does not start, tap the play button once.");
+        setSessionNote("Sound is at the door. Tap play and give it a tiny beat.");
 
         try {
           await audioRef.current.play();
@@ -272,7 +272,7 @@ export default function LiveSessionPage() {
           setStatus("Live");
           updateAwaitingGesture(false);
           setSessionNote(
-            "Connected. If playback pauses after app switching, return to this page and tap play once."
+            "You are in. If the beat slips, tap play and let it catch up."
           );
           syncMediaSession("playing");
           syncNativePlaybackState("playing", `Room ${roomId} is now playing.`);
@@ -280,7 +280,7 @@ export default function LiveSessionPage() {
         } catch (_playbackError) {
           setStatus("Tap play to start audio");
           updateAwaitingGesture(true);
-          setSessionNote("Your phone wants a tap before live audio can start. Tap the button once to continue.");
+          setSessionNote("One quick tap to wake the speakers, then give it a tiny beat.");
           syncMediaSession("paused");
           syncNativePlaybackState("paused", `Room ${roomId} is waiting for you to tap play.`);
           pushDiagnostic("Playback blocked until user taps play");
@@ -398,7 +398,7 @@ export default function LiveSessionPage() {
 
     async function startListener() {
       setStatus("Joining room");
-      setSessionNote("Joining the host room and waiting for the live audio stream.");
+      setSessionNote("Sliding into the room now. Tap play if your phone acts shy.");
       pushDiagnostic("Joining room");
       const initialRoom = await fetchSession(roomId);
       usesLiveKit = isLiveKitSession(initialRoom);
@@ -411,7 +411,7 @@ export default function LiveSessionPage() {
 
       if (usesLiveKit) {
         setStatus("Connecting audio");
-        setSessionNote("Connecting to the managed live audio room.");
+        setSessionNote("Warming up the audio lane. Tap play and let it lock in.");
         liveKitSessionRef.current = await connectListenerToLiveKitRoom({
           roomId,
           participantId: listener.listenerId,
@@ -425,7 +425,7 @@ export default function LiveSessionPage() {
             pushDiagnostic("Audio track received on listener");
             setStatus("Ready to play");
             setSessionNote(
-              "The host audio reached your device. If playback does not start, tap the play button once."
+              "Sound is at the door. Tap play and give it a tiny beat."
             );
           },
           onPlaybackStarted: () => {
@@ -434,7 +434,7 @@ export default function LiveSessionPage() {
             setError("");
             setStatus("Live");
             updateAwaitingGesture(false);
-            setSessionNote("Connected. Your device is now playing the host audio.");
+            setSessionNote("You are in. The room is now playing nice and loud.");
             syncMediaSession("playing");
             syncNativePlaybackState("playing", `Room ${roomId} is now playing.`);
             pushDiagnostic("Playback started successfully");
@@ -443,7 +443,7 @@ export default function LiveSessionPage() {
             setStatus("Tap play to start audio");
             updateAwaitingGesture(true);
             setSessionNote(
-              "Your phone wants a tap before live audio can start. Tap the button once to continue."
+              "One quick tap to wake the speakers, then give it a tiny beat."
             );
             syncMediaSession("paused");
             syncNativePlaybackState("paused", `Room ${roomId} is waiting for you to tap play.`);
@@ -624,7 +624,7 @@ export default function LiveSessionPage() {
       setError("");
       setStatus("Live");
       updateAwaitingGesture(false);
-      setSessionNote("Connected. Your device is now playing the host audio.");
+      setSessionNote("Boom. You are in and the room is playing.");
       syncMediaSession("playing");
       syncNativePlaybackState("playing", `Room ${roomId} is now playing.`);
       pushDiagnostic("Manual play succeeded");
