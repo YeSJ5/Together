@@ -80,7 +80,7 @@ button {
 .page-shell {
   position: relative;
   z-index: 1;
-  max-width: 1180px;
+  max-width: 1280px;
   margin: 0 auto;
   padding: 32px 18px 48px;
 }
@@ -327,16 +327,19 @@ button {
 }
 
 .mode-explainer-grid {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
 
 .mode-explainer {
-  min-height: 160px;
+  min-height: 0;
+  padding: 20px 22px;
 }
 
 .mode-explainer p {
   margin: 10px 0 0;
-  font-size: 0.95rem;
+  font-size: 1rem;
+  line-height: 1.55;
+  max-width: 22ch;
 }
 
 .home-grid {
@@ -500,8 +503,8 @@ button {
 .studio-shell,
 .listener-shell {
   display: grid;
-  grid-template-columns: 280px minmax(0, 1fr) 340px;
-  gap: 18px;
+  grid-template-columns: 280px minmax(0, 1.35fr) minmax(300px, 0.9fr);
+  gap: 22px;
   align-items: start;
 }
 
@@ -578,6 +581,7 @@ button {
 .studio-sidepanel {
   position: sticky;
   top: 24px;
+  align-self: start;
 }
 
 .compact-section-header {
@@ -794,10 +798,15 @@ button {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  flex-wrap: wrap;
 }
 
 .panel-heading h2 {
   margin: 0;
+}
+
+.panel-heading .mini-caption {
+  max-width: 24ch;
 }
 
 .chat-feed-large {
@@ -806,6 +815,7 @@ button {
 
 .qr-stack-center {
   justify-items: center;
+  width: 100%;
 }
 
 .hero-panel {
@@ -949,6 +959,13 @@ button {
   overflow-wrap: anywhere;
   word-break: break-word;
   font-size: 0.94rem;
+}
+
+.studio-sidepanel .empty-state {
+  padding: 18px;
+  border-radius: 18px;
+  background: rgba(247, 250, 255, 0.92);
+  border: 1px solid rgba(90, 123, 160, 0.12);
 }
 
 .listener-count {
