@@ -199,6 +199,20 @@ button {
   justify-content: flex-end;
 }
 
+.install-help-box {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border-radius: 16px;
+  background: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.install-help-box strong {
+  color: #fff8ef;
+}
+
 .hero-card,
 .content-card,
 .center-card {
@@ -555,8 +569,10 @@ button {
 }
 
 .studio-main,
-.listener-main {
+.listener-main,
+.studio-sidepanel {
   min-height: calc(100vh - 120px);
+  min-width: 0;
 }
 
 .studio-sidepanel {
@@ -928,7 +944,10 @@ button {
 }
 
 .join-url {
-  word-break: break-all;
+  display: block;
+  max-width: 100%;
+  overflow-wrap: anywhere;
+  word-break: break-word;
   font-size: 0.94rem;
 }
 

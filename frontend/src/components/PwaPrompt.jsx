@@ -43,6 +43,7 @@ export default function PwaPrompt() {
       window.__togetherDeferredInstallPrompt = event;
       setInstallEvent(event);
       setDismissed(false);
+      setShowInstallHelp(false);
       sessionStorage.removeItem(DISMISS_KEY);
     }
 
@@ -50,6 +51,7 @@ export default function PwaPrompt() {
       window.__togetherDeferredInstallPrompt = null;
       setInstallEvent(null);
       setDismissed(true);
+      setShowInstallHelp(false);
       sessionStorage.setItem(DISMISS_KEY, "1");
     }
 
@@ -96,13 +98,8 @@ export default function PwaPrompt() {
       </div>
       <div className="install-actions">
         <button type="button" className="button-primary" onClick={handleInstall}>
-          Install App
+          {installEvent ? "Install App" : "Open Install Steps"}
         </button>
-        {showInstallHelp ? (
-          <p className="subtle-text install-hint">
-            {installHelpText}
-          </p>
-        ) : null}
         <button
           type="button"
           className="button-secondary"
@@ -114,6 +111,12 @@ export default function PwaPrompt() {
           Hide
         </button>
       </div>
+      {showInstallHelp ? (
+        <div className="install-help-box">
+          <strong>{installEvent ? "Install was not completed" : "Install steps"}</strong>
+          <p className="subtle-text install-hint">{installHelpText}</p>
+        </div>
+      ) : null}
     </section>
   );
 }
