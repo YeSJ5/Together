@@ -13,6 +13,7 @@ import { createAppId } from "../lib/ids";
 import { getNativeAudioCapabilities, isNativeAndroidApp, startNativeSystemAudioBridge } from "../lib/nativeAudio";
 import { sanitizeChatMessage, sanitizeDisplayName } from "../lib/sanitize";
 import { clearHostSession, saveHostSession } from "../lib/storage";
+import { useCompactViewport } from "../lib/useCompactViewport";
 import { useNavigationLock } from "../lib/useNavigationLock";
 import { captureHostAudio, createPeerConnection } from "../lib/webrtc";
 
@@ -30,6 +31,7 @@ function detectMobileHost() {
 
 export default function HostDashboardPage() {
   const isMobileHost = detectMobileHost();
+  const isCompactViewport = useCompactViewport();
   const [hostName, setHostName] = useState("Host");
   const [audioSourceMode, setAudioSourceMode] = useState(
     isMobileHost ? "microphone" : "device-audio"
@@ -131,6 +133,12 @@ export default function HostDashboardPage() {
       teardownLocalSession();
     };
   }, []);
+
+  useEffect(() => {
+    if (!isCompactViewport && activeTab === "access") {
+      setActiveTab("studio");
+    }
+  }, [activeTab, isCompactViewport]);
 
   useEffect(() => {
     if (!session?.roomId) {
@@ -360,7 +368,7 @@ export default function HostDashboardPage() {
         return current;
       }
 
-      return [...current, message].slice(-20);
+      return [message, ...current].slice(0, 20);
     });
   }
 
@@ -628,11 +636,303 @@ export default function HostDashboardPage() {
     }
   }
 
+  const sessionAccessPanel = (
+    <>
+      <div className="panel-heading">
+        <h2>Session access</h2>
+        <span className="mini-caption">
+          {isCompactViewport ? "Share from this tab" : "Always visible while you host"}
+        </span>
+      </div>
+      {session ? (
+        <div className="qr-stack qr-stack-center">
+          <div className="qr-card">
+            <QRCode value={joinUrl} size={180} />
+          </div>
+          <p className="info-line">
+            <strong>Room ID:</strong> {session.roomId}
+          </p>
+          <p className="join-url">{joinUrl}</p>
+          <div className="button-row compact-row">
+            <button type="button" className="button-secondary" onClick={handleCopyJoinLink}>
+              Copy Link
+            </button>
+            {navigator.share ? (
+              <button type="button" className="button-secondary" onClick={handleShareJoinLink}>
+                Share
+              </button>
+            ) : null}
+          </div>
+          {copiedState ? <p className="subtle-text">{copiedState}</p> : null}
+        </div>
+      ) : (
+        <p className="empty-state">
+          Start a session to generate the room, QR code, and join link.
+        </p>
+      )}
+    </>
+  );
+
+  const studioPanel = (
+    <div className="app-panel content-stage">
+      <div className="panel-heading">
+        <h2>Studio controls</h2>
+        <span className="mini-caption">Pick the clearest source for this session</span>
+      </div>
+      <div className="source-toggle">
+        <button
+          type="button"
+          className={audioSourceMode === "device-audio" ? "chip active" : "chip"}
+          onClick={() => setAudioSourceMode("device-audio")}
+          disabled={!canUseDeviceAudio}
+        >
+          Device Audio
+        </button>
+        <button
+          type="button"
+          className={audioSourceMode === "microphone" ? "chip active" : "chip"}
+          onClick={() => setAudioSourceMode("microphone")}
+        >
+          Microphone
+        </button>
+        <button
+          type="button"
+          className={audioSourceMode === "audio-file" ? "chip active" : "chip"}
+          onClick={() => setAudioSourceMode("audio-file")}
+        >
+          Audio File
+        </button>
+      </div>
+
+      <input
+        className="text-input"
+        placeholder="Host name"
+        value={hostName}
+        maxLength={32}
+        onChange={(event) => setHostName(sanitizeDisplayName(event.target.value, ""))}
+        disabled={Boolean(session)}
+      />
+
+      <div className="mode-explainer-grid">
+        <div className="mode-explainer">
+          <strong>Device Audio</strong>
+          <p>Best for browser tabs, laptop playback, videos, and anything your desktop can share directly.</p>
+        </div>
+        <div className="mode-explainer">
+          <strong>Microphone</strong>
+          <p>Best for voice rooms, quick announcements, teaching, and live conversation from any device.</p>
+        </div>
+        <div className="mode-explainer">
+          <strong>Audio File</strong>
+          <p>Best for phones or portable hosting when you want a predictable, stable audio source.</p>
+        </div>
+      </div>
+
+      {audioSourceMode === "audio-file" ? (
+        <div className="file-host-panel">
+          <label className="file-picker" htmlFor="audio-file-input">
+            Choose audio file
+          </label>
+          <input
+            id="audio-file-input"
+            className="file-input"
+            type="file"
+            accept="audio/*"
+            onChange={(event) => {
+              setSelectedAudioFile(event.target.files?.[0] || null);
+            }}
+          />
+          <p className="subtle-text">
+            Best mobile fallback: pick a song, lecture clip, or podcast file from your phone and TOGETHER will stream it live to listeners.
+          </p>
+          <p className="subtle-text">
+            {selectedAudioFile
+              ? `Selected file: ${selectedAudioFile.name}`
+              : "No audio file selected yet."}
+          </p>
+        </div>
+      ) : null}
+
+      {isMobileHost ? (
+        <p className="subtle-text">
+          Hosting from a phone works best in <strong>Microphone</strong> or <strong>Audio File</strong> mode.
+          {nativeCapabilities.systemAudioCapture
+            ? " Native mobile capture is available on supported Android setups."
+            : " Mobile browsers still do not reliably support full device audio output sharing."}
+        </p>
+      ) : null}
+    </div>
+  );
+
+  const peoplePanel = (
+    <div className="app-panel content-stage">
+      <div className="panel-heading">
+        <h2>Participants</h2>
+        <button
+          type="button"
+          className="button-secondary diagnostics-toggle"
+          onClick={() => setShowHostDetails((current) => !current)}
+        >
+          {showHostDetails ? "Hide Details" : "View Details"}
+        </button>
+      </div>
+      {showHostDetails ? (
+        <div className="diagnostic-card">
+          <strong>Host details</strong>
+          <p className="diagnostic-line">{audioDebug}</p>
+          <p className="diagnostic-line">{hostSignalDebug}</p>
+        </div>
+      ) : null}
+      <div className="listener-list">
+        {participantList.length === 0 ? (
+          <p className="empty-state">No participants yet.</p>
+        ) : (
+          participantList.map((user) => (
+            <div key={user.id} className="listener-pill participant-pill">
+              <span>{user.username}</span>
+              <strong>{user.role}</strong>
+            </div>
+          ))
+        )}
+      </div>
+      <div className="activity-feed">
+        <p className="section-kicker">Recent activity</p>
+        {recentActivity.length === 0 ? (
+          <p className="empty-state">Join and leave updates will appear here.</p>
+        ) : (
+          recentActivity.map((item, index) => (
+            <p key={`${item}-${index}`} className="activity-line">
+              {item}
+            </p>
+          ))
+        )}
+      </div>
+    </div>
+  );
+
+  const chatPanel = (
+    <div className="app-panel content-stage">
+      <div className="panel-heading">
+        <h2>Room chat</h2>
+        <span className="mini-caption">Newest messages stay at the top</span>
+      </div>
+      <div className="chat-feed chat-feed-large latest-first">
+        {chatMessages.length === 0 ? (
+          <p className="empty-state">Room messages will appear here.</p>
+        ) : (
+          chatMessages.map((message) => (
+            <div key={message.id} className="chat-bubble">
+              <div className="chat-meta">
+                <strong>{message.senderName}</strong>
+                <span>{message.audience}</span>
+              </div>
+              <p>{message.message}</p>
+            </div>
+          ))
+        )}
+      </div>
+      <div className="chat-compose">
+        <input
+          className="text-input"
+          placeholder="Send a message to the room"
+          value={chatInput}
+          maxLength={220}
+          onChange={(event) => setChatInput(event.target.value)}
+        />
+        <button type="button" className="button-primary" onClick={handleSendChat}>
+          Send
+        </button>
+      </div>
+    </div>
+  );
+
+  const compactHostTabs = [
+    { id: "studio", label: "Studio" },
+    { id: "access", label: "Access" },
+    { id: "people", label: "People" },
+    { id: "chat", label: "Chat" }
+  ];
+
   return (
     <AppShell
       lockNavigation={Boolean(session)}
       lockLabel="Finish or end the live session first"
     >
+      {isCompactViewport ? (
+        <section className="mobile-app-shell fade-in">
+          <div className="content-card mobile-hero-card">
+            <div className="mobile-title-row">
+              <div>
+                <p className="eyebrow">Host studio</p>
+                <h1>Broadcast your live audio</h1>
+              </div>
+              <StatusBadge tone={session ? "success" : "neutral"}>{status}</StatusBadge>
+            </div>
+
+            <div className="mobile-stat-strip">
+              <div className="mobile-stat-pill">
+                <span>Room</span>
+                <strong>{session?.roomId || "Not live"}</strong>
+              </div>
+              <div className="mobile-stat-pill">
+                <span>Listeners</span>
+                <strong>{connectedUsers.length}</strong>
+              </div>
+              <div className="mobile-stat-pill">
+                <span>Source</span>
+                <strong>
+                  {audioSourceMode === "device-audio"
+                    ? "Device"
+                    : audioSourceMode === "audio-file"
+                      ? "File"
+                      : "Mic"}
+                </strong>
+              </div>
+            </div>
+
+            <div className="mobile-primary-actions">
+              <button
+                type="button"
+                className="button-primary"
+                onClick={handleStartSession}
+                disabled={Boolean(session) || isStarting}
+              >
+                {isStarting ? "Starting..." : "Go Live"}
+              </button>
+              <button
+                type="button"
+                className="button-secondary"
+                onClick={handleEndSession}
+                disabled={!session}
+              >
+                End
+              </button>
+            </div>
+          </div>
+
+          {error ? <p className="error-banner">{error}</p> : null}
+
+          <div className="mobile-tab-dock" role="tablist" aria-label="Host sections">
+            {compactHostTabs.map((tab) => (
+              <button
+                key={tab.id}
+                type="button"
+                className={activeTab === tab.id ? "mobile-tab-button active" : "mobile-tab-button"}
+                onClick={() => setActiveTab(tab.id)}
+              >
+                {tab.label}
+              </button>
+            ))}
+          </div>
+
+          <section className="content-card mobile-content-card">
+            {activeTab === "studio" ? studioPanel : null}
+            {activeTab === "access" ? <div className="app-panel content-stage">{sessionAccessPanel}</div> : null}
+            {activeTab === "people" ? peoplePanel : null}
+            {activeTab === "chat" ? chatPanel : null}
+          </section>
+        </section>
+      ) : (
       <section className="studio-shell fade-in">
         <aside className="content-card studio-sidebar">
           <div className="studio-brand">
@@ -901,42 +1201,10 @@ export default function HostDashboardPage() {
         </article>
 
         <aside className="content-card studio-sidepanel slide-up">
-          <div className="panel-heading">
-            <h2>Session access</h2>
-            <span className="mini-caption">Always visible while you host</span>
-          </div>
-          {session ? (
-            <div className="qr-stack qr-stack-center">
-              <div className="qr-card">
-                <QRCode value={joinUrl} size={180} />
-              </div>
-              <p className="info-line">
-                <strong>Room ID:</strong> {session.roomId}
-              </p>
-              <p className="join-url">{joinUrl}</p>
-              <div className="button-row compact-row">
-                <button type="button" className="button-secondary" onClick={handleCopyJoinLink}>
-                  Copy Link
-                </button>
-                {navigator.share ? (
-                  <button
-                    type="button"
-                    className="button-secondary"
-                    onClick={handleShareJoinLink}
-                  >
-                    Share
-                  </button>
-                ) : null}
-              </div>
-              {copiedState ? <p className="subtle-text">{copiedState}</p> : null}
-            </div>
-          ) : (
-            <p className="empty-state">
-              Start a session to generate the room, QR code, and join link.
-            </p>
-          )}
+          {sessionAccessPanel}
         </aside>
       </section>
+      )}
     </AppShell>
   );
 }

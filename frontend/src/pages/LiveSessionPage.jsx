@@ -16,12 +16,14 @@ import {
 } from "../lib/nativeAudio";
 import { sanitizeChatMessage } from "../lib/sanitize";
 import { clearListenerSession, getListenerSession } from "../lib/storage";
+import { useCompactViewport } from "../lib/useCompactViewport";
 import { useNavigationLock } from "../lib/useNavigationLock";
 import { createPeerConnection } from "../lib/webrtc";
 
 export default function LiveSessionPage() {
   const { roomId } = useParams();
   const navigate = useNavigate();
+  const isCompactViewport = useCompactViewport();
   const audioRef = useRef(null);
   const peerConnectionRef = useRef(null);
   const pollingRef = useRef(null);
@@ -73,7 +75,7 @@ export default function LiveSessionPage() {
         return current;
       }
 
-      return [...current, message].slice(-20);
+      return [message, ...current].slice(0, 20);
     });
   }
 
@@ -481,11 +483,192 @@ export default function LiveSessionPage() {
       ]
     : [];
 
+  const playerPanel = (
+    <div className="app-panel">
+      <label className="volume-stack" htmlFor="volume">
+        Volume
+        <input
+          id="volume"
+          type="range"
+          min="0"
+          max="100"
+          value={volume}
+          onChange={handleVolumeChange}
+        />
+      </label>
+      <button
+        type="button"
+        className="button-secondary diagnostics-toggle"
+        onClick={() => setShowDiagnostics((current) => !current)}
+      >
+        {showDiagnostics ? "Hide Details" : "Connection Details"}
+      </button>
+      {showDiagnostics ? (
+        <div className="diagnostic-card">
+          <strong>Connection details</strong>
+          {diagnostics.map((item, index) => (
+            <p key={`${item}-${index}`} className="diagnostic-line">
+              {item}
+            </p>
+          ))}
+        </div>
+      ) : null}
+    </div>
+  );
+
+  const peoplePanel = (
+    <div className="app-panel">
+      <div className="panel-heading">
+        <h2>People in this room</h2>
+        <span className="mini-caption">Live room presence</span>
+      </div>
+      <div className="listener-list">
+        {participantList.length === 0 ? (
+          <p className="empty-state">Room members will appear here.</p>
+        ) : (
+          participantList.map((user) => (
+            <div key={user.id} className="listener-pill participant-pill">
+              <span>{user.username}</span>
+              <strong>{user.role}</strong>
+            </div>
+          ))
+        )}
+      </div>
+    </div>
+  );
+
+  const chatPanel = (
+    <div className="app-panel">
+      <div className="panel-heading">
+        <h2>Room chat</h2>
+        <span className="mini-caption">Newest messages stay at the top</span>
+      </div>
+      <div className="chat-feed chat-feed-large latest-first">
+        {chatMessages.length === 0 ? (
+          <p className="empty-state">Messages shared in this room will appear here.</p>
+        ) : (
+          chatMessages.map((message) => (
+            <div key={message.id} className="chat-bubble">
+              <div className="chat-meta">
+                <strong>{message.senderName}</strong>
+                <span>{message.audience}</span>
+              </div>
+              <p>{message.message}</p>
+            </div>
+          ))
+        )}
+      </div>
+      <div className="chat-compose">
+        <select
+          className="text-input chat-select"
+          value={chatAudience}
+          onChange={(event) => setChatAudience(event.target.value)}
+        >
+          <option value="everyone">Message everyone</option>
+          <option value="host">Message host only</option>
+        </select>
+        <input
+          className="text-input"
+          placeholder="Send a message"
+          value={chatInput}
+          maxLength={220}
+          onChange={(event) => setChatInput(event.target.value)}
+        />
+        <button type="button" className="button-primary" onClick={handleSendChat}>
+          Send
+        </button>
+      </div>
+    </div>
+  );
+
   return (
     <AppShell
       lockNavigation={!isLeaving && status !== "Session ended" && status !== "Unavailable"}
       lockLabel="Leave the room before navigating"
     >
+      {isCompactViewport ? (
+        <section className="mobile-app-shell fade-in">
+          <div className="content-card mobile-hero-card">
+            <div className="mobile-title-row">
+              <div>
+                <p className="eyebrow">Listener view</p>
+                <h1>Listening live</h1>
+              </div>
+              <StatusBadge tone={connected ? "success" : "warning"}>{status}</StatusBadge>
+            </div>
+
+            <p className="subtle-text mobile-session-note">{sessionNote}</p>
+            {error ? <p className="error-banner">{error}</p> : null}
+
+            <audio
+              ref={audioRef}
+              autoPlay
+              playsInline
+              controls
+              className="debug-audio-player"
+              onPause={() => {
+                if (connectedRef.current && !awaitingGestureRef.current && hiddenRef.current) {
+                  attemptPlaybackResume("audio paused in background");
+                }
+              }}
+            />
+
+            <div className="mobile-stat-strip">
+              <div className="mobile-stat-pill">
+                <span>Room</span>
+                <strong>{roomId}</strong>
+              </div>
+              <div className="mobile-stat-pill">
+                <span>People</span>
+                <strong>{participantList.length}</strong>
+              </div>
+              <div className="mobile-stat-pill">
+                <span>Status</span>
+                <strong>{connected ? "Live" : "Connecting"}</strong>
+              </div>
+            </div>
+
+            <div className="mobile-primary-actions">
+              <button type="button" className="button-primary" onClick={handleManualPlay}>
+                {awaitingGesture ? "Enable Audio" : "Play"}
+              </button>
+              <button type="button" className="button-secondary" onClick={handleLeaveRoom}>
+                Leave
+              </button>
+            </div>
+          </div>
+
+          <div className="mobile-tab-dock" role="tablist" aria-label="Listener sections">
+            <button
+              type="button"
+              className={activeTab === "player" ? "mobile-tab-button active" : "mobile-tab-button"}
+              onClick={() => setActiveTab("player")}
+            >
+              Player
+            </button>
+            <button
+              type="button"
+              className={activeTab === "people" ? "mobile-tab-button active" : "mobile-tab-button"}
+              onClick={() => setActiveTab("people")}
+            >
+              People
+            </button>
+            <button
+              type="button"
+              className={activeTab === "chat" ? "mobile-tab-button active" : "mobile-tab-button"}
+              onClick={() => setActiveTab("chat")}
+            >
+              Chat
+            </button>
+          </div>
+
+          <section className="content-card mobile-content-card">
+            {activeTab === "player" ? playerPanel : null}
+            {activeTab === "people" ? peoplePanel : null}
+            {activeTab === "chat" ? chatPanel : null}
+          </section>
+        </section>
+      ) : (
       <section className="listener-shell fade-in">
         <aside className="content-card listener-sidebar">
           <div className="studio-brand">
@@ -587,105 +770,20 @@ export default function LiveSessionPage() {
 
           <div className="player-card listener-stage">
             {activeTab === "player" ? (
-              <div className="app-panel">
-                <label className="volume-stack" htmlFor="volume">
-                  Volume
-                  <input
-                    id="volume"
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={volume}
-                    onChange={handleVolumeChange}
-                  />
-                </label>
-                <button
-                  type="button"
-                  className="button-secondary diagnostics-toggle"
-                  onClick={() => setShowDiagnostics((current) => !current)}
-                >
-                  {showDiagnostics ? "Hide Details" : "Connection Details"}
-                </button>
-                {showDiagnostics ? (
-                  <div className="diagnostic-card">
-                    <strong>Connection details</strong>
-                    {diagnostics.map((item, index) => (
-                      <p key={`${item}-${index}`} className="diagnostic-line">
-                        {item}
-                      </p>
-                    ))}
-                  </div>
-                ) : null}
-              </div>
+              playerPanel
             ) : null}
 
             {activeTab === "people" ? (
-              <div className="app-panel">
-                <div className="panel-heading">
-                  <h2>People in this room</h2>
-                  <span className="mini-caption">Live room presence</span>
-                </div>
-                <div className="listener-list">
-                  {participantList.length === 0 ? (
-                    <p className="empty-state">Room members will appear here.</p>
-                  ) : (
-                    participantList.map((user) => (
-                      <div key={user.id} className="listener-pill participant-pill">
-                        <span>{user.username}</span>
-                        <strong>{user.role}</strong>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
+              peoplePanel
             ) : null}
 
             {activeTab === "chat" ? (
-              <div className="app-panel">
-                <div className="panel-heading">
-                  <h2>Room chat</h2>
-                  <span className="mini-caption">Talk to host or everyone</span>
-                </div>
-                <div className="chat-feed chat-feed-large">
-                  {chatMessages.length === 0 ? (
-                    <p className="empty-state">Messages shared in this room will appear here.</p>
-                  ) : (
-                    chatMessages.map((message) => (
-                      <div key={message.id} className="chat-bubble">
-                        <div className="chat-meta">
-                          <strong>{message.senderName}</strong>
-                          <span>{message.audience}</span>
-                        </div>
-                        <p>{message.message}</p>
-                      </div>
-                    ))
-                  )}
-                </div>
-                <div className="chat-compose">
-                  <select
-                    className="text-input chat-select"
-                    value={chatAudience}
-                    onChange={(event) => setChatAudience(event.target.value)}
-                  >
-                    <option value="everyone">Message everyone</option>
-                    <option value="host">Message host only</option>
-                  </select>
-                  <input
-                    className="text-input"
-                    placeholder="Send a message"
-                    value={chatInput}
-                    maxLength={220}
-                    onChange={(event) => setChatInput(event.target.value)}
-                  />
-                  <button type="button" className="button-primary" onClick={handleSendChat}>
-                    Send
-                  </button>
-                </div>
-              </div>
+              chatPanel
             ) : null}
           </div>
         </article>
       </section>
+      )}
     </AppShell>
   );
 }

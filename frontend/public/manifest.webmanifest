@@ -1,13 +1,16 @@
 {
   "name": "TOGETHER",
   "short_name": "TOGETHER",
+  "id": "/",
   "description": "QR-based real-time multi-user audio streaming for nearby listening sessions.",
   "start_url": "/",
   "scope": "/",
   "display": "standalone",
+  "display_override": ["standalone", "browser"],
   "background_color": "#fff8ef",
   "theme_color": "#132238",
   "orientation": "portrait",
+  "prefer_related_applications": false,
   "icons": [
     {
       "src": "/icon-192.svg",

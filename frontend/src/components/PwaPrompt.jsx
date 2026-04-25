@@ -56,19 +56,19 @@ export default function PwaPrompt() {
   return (
     <section className="install-banner compact-install fade-in">
       <div>
-        <strong>Install TOGETHER</strong>
+        <strong>Install the TOGETHER app</strong>
         <p className="subtle-text install-copy">
-          Add it to your phone for quicker re-entry and a cleaner mobile experience.
+          Install it on your phone for a cleaner mobile experience, faster re-entry, and better background playback support.
         </p>
       </div>
       <div className="install-actions">
         {installEvent ? (
           <button type="button" className="button-primary" onClick={handleInstall}>
-            Install
+            Install App
           </button>
         ) : (
           <p className="subtle-text install-hint">
-            Open the browser menu and choose <strong>Add to Home screen</strong>.
+            Open the browser menu and choose <strong>Install app</strong> if your browser offers it.
           </p>
         )}
         <button
