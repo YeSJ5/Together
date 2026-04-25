@@ -110,6 +110,10 @@ button {
 
 :root[data-theme="dark"] .brand-link,
 :root[data-theme="dark"] .mini-feature strong,
+:root[data-theme="dark"] .home-action-card strong,
+:root[data-theme="dark"] .studio-guide-header strong,
+:root[data-theme="dark"] .studio-note-card strong,
+:root[data-theme="dark"] .listener-quick-card strong,
 :root[data-theme="dark"] .spotlight-row strong,
 :root[data-theme="dark"] .mode-explainer strong,
 :root[data-theme="dark"] .mobile-stat-pill strong,
@@ -124,6 +128,10 @@ button {
 
 :root[data-theme="dark"] .topbar-copy,
 :root[data-theme="dark"] .mini-feature span,
+:root[data-theme="dark"] .home-action-card p,
+:root[data-theme="dark"] .studio-guide-header span,
+:root[data-theme="dark"] .studio-note-card p,
+:root[data-theme="dark"] .listener-quick-card span,
 :root[data-theme="dark"] .spotlight-row span,
 :root[data-theme="dark"] .mode-explainer p,
 :root[data-theme="dark"] .hero-text,
@@ -226,6 +234,10 @@ button {
 :root[data-theme="dark"] .hero-card,
 :root[data-theme="dark"] .content-card,
 :root[data-theme="dark"] .center-card,
+:root[data-theme="dark"] .home-action-card,
+:root[data-theme="dark"] .studio-guide-panel,
+:root[data-theme="dark"] .studio-note-card,
+:root[data-theme="dark"] .listener-quick-card,
 :root[data-theme="dark"] .mobile-stat-pill,
 :root[data-theme="dark"] .workspace-stat,
 :root[data-theme="dark"] .metric-card,
@@ -312,6 +324,41 @@ button {
 
 .spotlight-list {
   margin-top: 16px;
+}
+
+.home-action-strip {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.home-action-card {
+  display: grid;
+  gap: 8px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(90, 123, 160, 0.12);
+}
+
+.home-action-card span {
+  width: 32px;
+  height: 32px;
+  display: inline-grid;
+  place-items: center;
+  border-radius: 999px;
+  background: rgba(21, 38, 61, 0.08);
+  color: #15263d;
+  font-weight: 700;
+}
+
+.home-action-card strong {
+  color: #132238;
+}
+
+.home-action-card p {
+  margin: 0;
+  color: #66788f;
 }
 
 .spotlight-row {
@@ -454,7 +501,8 @@ button {
 :root[data-theme="dark"] .chip,
 :root[data-theme="dark"] .file-picker,
 :root[data-theme="dark"] .text-input,
-:root[data-theme="dark"] .studio-nav-button {
+:root[data-theme="dark"] .studio-nav-button,
+:root[data-theme="dark"] .home-action-card span {
   background: rgba(255, 255, 255, 0.06);
   color: #eef5ff;
   border-color: rgba(163, 186, 214, 0.16);
@@ -796,6 +844,62 @@ button {
   gap: 16px;
 }
 
+.studio-command-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1.15fr) minmax(280px, 0.85fr);
+  gap: 18px;
+  align-items: start;
+}
+
+.studio-form-stack,
+.studio-guide-panel {
+  display: grid;
+  gap: 16px;
+}
+
+.studio-guide-panel {
+  padding: 18px;
+  border-radius: 22px;
+  background: rgba(247, 250, 255, 0.92);
+  border: 1px solid rgba(90, 123, 160, 0.12);
+}
+
+.studio-guide-header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  flex-wrap: wrap;
+}
+
+.studio-guide-header strong {
+  color: #132238;
+  font-size: 1rem;
+}
+
+.studio-guide-header span {
+  color: #66788f;
+  font-size: 0.88rem;
+}
+
+.studio-note-card {
+  display: grid;
+  gap: 8px;
+  padding: 16px 18px;
+  border-radius: 20px;
+  background: linear-gradient(135deg, rgba(255, 141, 77, 0.1), rgba(123, 201, 255, 0.1));
+  border: 1px solid rgba(90, 123, 160, 0.12);
+}
+
+.studio-note-card strong {
+  color: #132238;
+}
+
+.studio-note-card p {
+  margin: 0;
+  color: #53657b;
+}
+
 .panel-heading {
   display: flex;
   align-items: center;
@@ -1071,6 +1175,31 @@ button {
   color: #53657b;
 }
 
+.listener-quick-strip {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.listener-quick-card {
+  display: grid;
+  gap: 6px;
+  padding: 14px 16px;
+  border-radius: 18px;
+  background: rgba(247, 250, 255, 0.92);
+  border: 1px solid rgba(90, 123, 160, 0.12);
+}
+
+.listener-quick-card span {
+  color: #66788f;
+  font-size: 0.82rem;
+}
+
+.listener-quick-card strong {
+  color: #132238;
+  line-height: 1.3;
+}
+
 .diagnostic-card {
   padding: 16px;
   border-radius: 18px;
@@ -1195,6 +1324,9 @@ button {
   .dashboard-grid,
   .workspace-grid,
   .content-grid,
+  .home-action-strip,
+  .studio-command-grid,
+  .listener-quick-strip,
   .studio-shell,
   .listener-shell,
   .hero-mini-grid,

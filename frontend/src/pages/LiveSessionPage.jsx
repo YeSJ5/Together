@@ -699,6 +699,16 @@ export default function LiveSessionPage() {
 
   const playerPanel = (
     <div className="app-panel">
+      <div className="listener-quick-strip">
+        <div className="listener-quick-card">
+          <span>Fast tip</span>
+          <strong>Tap play once. Give it a beat.</strong>
+        </div>
+        <div className="listener-quick-card">
+          <span>Room status</span>
+          <strong>{connected ? "Locked in" : "Tuning in"}</strong>
+        </div>
+      </div>
       <label className="volume-stack" htmlFor="volume">
         Volume
         <input

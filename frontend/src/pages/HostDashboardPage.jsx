@@ -954,94 +954,107 @@ export default function HostDashboardPage() {
         <h2>Studio controls</h2>
         <span className="mini-caption">Pick the clearest source for this session</span>
       </div>
-      <div className="source-toggle">
-        <button
-          type="button"
-          className={audioSourceMode === "device-audio" ? "chip active" : "chip"}
-          onClick={() => setAudioSourceMode("device-audio")}
-          disabled={!canUseDeviceAudio}
-        >
-          Device Audio
-        </button>
-        <button
-          type="button"
-          className={audioSourceMode === "microphone" ? "chip active" : "chip"}
-          onClick={() => setAudioSourceMode("microphone")}
-        >
-          Microphone
-        </button>
-        <button
-          type="button"
-          className={audioSourceMode === "audio-file" ? "chip active" : "chip"}
-          onClick={() => setAudioSourceMode("audio-file")}
-        >
-          Audio File
-        </button>
-      </div>
+      <div className="studio-command-grid">
+        <div className="studio-form-stack">
+          <div className="source-toggle">
+            <button
+              type="button"
+              className={audioSourceMode === "device-audio" ? "chip active" : "chip"}
+              onClick={() => setAudioSourceMode("device-audio")}
+              disabled={!canUseDeviceAudio}
+            >
+              Device Audio
+            </button>
+            <button
+              type="button"
+              className={audioSourceMode === "microphone" ? "chip active" : "chip"}
+              onClick={() => setAudioSourceMode("microphone")}
+            >
+              Microphone
+            </button>
+            <button
+              type="button"
+              className={audioSourceMode === "audio-file" ? "chip active" : "chip"}
+              onClick={() => setAudioSourceMode("audio-file")}
+            >
+              Audio File
+            </button>
+          </div>
 
-      {audioSourceMode === "audio-file" ? (
-        <div className="file-host-panel">
-          <label className="file-picker" htmlFor="audio-file-input">
-            Choose audio file
-          </label>
           <input
-            id="audio-file-input"
-            className="file-input"
-            type="file"
-            accept="audio/*"
-            onChange={(event) => {
-              setSelectedAudioFile(event.target.files?.[0] || null);
-            }}
+            className="text-input"
+            placeholder="Host name"
+            value={hostName}
+            maxLength={32}
+            onChange={(event) => setHostName(sanitizeDisplayName(event.target.value, ""))}
+            disabled={Boolean(session)}
           />
-          <p className="subtle-text">
-            Pick a song, lecture clip, or podcast file from your device and TOGETHER will stream it live to listeners.
-          </p>
-          <p className="subtle-text">
-            {selectedAudioFile
-              ? `Selected file: ${selectedAudioFile.name}`
-              : "No audio file selected yet."}
-          </p>
-        </div>
-      ) : null}
 
-      <input
-        className="text-input"
-        placeholder="Host name"
-        value={hostName}
-        maxLength={32}
-        onChange={(event) => setHostName(sanitizeDisplayName(event.target.value, ""))}
-        disabled={Boolean(session)}
-      />
+          {audioSourceMode === "audio-file" ? (
+            <div className="file-host-panel">
+              <label className="file-picker" htmlFor="audio-file-input">
+                Choose audio file
+              </label>
+              <input
+                id="audio-file-input"
+                className="file-input"
+                type="file"
+                accept="audio/*"
+                onChange={(event) => {
+                  setSelectedAudioFile(event.target.files?.[0] || null);
+                }}
+              />
+              <p className="subtle-text">
+                Pick a song, lecture clip, or podcast file from your device and TOGETHER will stream it live to listeners.
+              </p>
+              <p className="subtle-text">
+                {selectedAudioFile
+                  ? `Selected file: ${selectedAudioFile.name}`
+                  : "No audio file selected yet."}
+              </p>
+            </div>
+          ) : null}
 
-      <div className="mode-explainer-grid">
-        <div className="mode-explainer">
-          <strong>Device Audio</strong>
-          <p>Best for browser tabs, laptop playback, videos, and anything your desktop can share directly.</p>
+          <div className="studio-note-card">
+            <strong>{session ? "Switch inside the same room" : "Pick the cleanest source fast"}</strong>
+            <p>
+              {session
+                ? "This room stays live while you switch sources, so listeners can stay inside the same session."
+                : "Choose a source, set your host name, and go live without hunting through extra controls."}
+            </p>
+          </div>
+
+          {isMobileHost ? (
+            <p className="subtle-text">
+              Hosting from a phone works best in <strong>Microphone</strong> or <strong>Audio File</strong> mode.
+              {nativeCapabilities.systemAudioCapture
+                ? " Native mobile capture is available on supported Android setups."
+                : " Mobile browsers still do not reliably support full device audio output sharing."}
+            </p>
+          ) : null}
         </div>
-        <div className="mode-explainer">
-          <strong>Microphone</strong>
-          <p>Best for voice rooms, quick announcements, teaching, and live conversation from any device.</p>
-        </div>
-        <div className="mode-explainer">
-          <strong>Audio File</strong>
-          <p>Best for phones or portable hosting when you want a predictable, stable audio source.</p>
+
+        <div className="studio-guide-panel">
+          <div className="studio-guide-header">
+            <strong>Quick source guide</strong>
+            <span>Choose in seconds</span>
+          </div>
+          <div className="mode-explainer-grid">
+            <div className="mode-explainer">
+              <strong>Device Audio</strong>
+              <p>Browser tabs, laptop playback, videos, and anything your desktop can share directly.</p>
+            </div>
+            <div className="mode-explainer">
+              <strong>Microphone</strong>
+              <p>Voice rooms, teaching, announcements, and live conversation from any device.</p>
+            </div>
+            <div className="mode-explainer">
+              <strong>Audio File</strong>
+              <p>Stable hosting for phones, portable setups, and moments where you want a predictable source.</p>
+            </div>
+          </div>
         </div>
       </div>
-
-      {isMobileHost ? (
-        <p className="subtle-text">
-          Hosting from a phone works best in <strong>Microphone</strong> or <strong>Audio File</strong> mode.
-          {nativeCapabilities.systemAudioCapture
-            ? " Native mobile capture is available on supported Android setups."
-            : " Mobile browsers still do not reliably support full device audio output sharing."}
-        </p>
-      ) : null}
-
-      {session ? (
-        <p className="subtle-text">
-          This room stays live while you switch sources. Pick a new source above and tap <strong>Switch Source</strong> to change it without creating a new link.
-        </p>
-      ) : null}
     </div>
   );
 
