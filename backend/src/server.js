@@ -208,6 +208,29 @@ app.get("/session/:id", (request, response) => {
   return response.json(session);
 });
 
+app.patch("/session/:id/source", (request, response) => {
+  const { audioSourceMode } = request.body || {};
+  const session = getRawSession(request.params.id);
+
+  if (!session) {
+    return response.status(404).json({
+      message: "Session not found or expired."
+    });
+  }
+
+  if (!audioSourceMode) {
+    return response.status(400).json({
+      message: "audioSourceMode is required."
+    });
+  }
+
+  const updated = updateSession(request.params.id, (draft) => {
+    draft.audioSourceMode = audioSourceMode;
+  });
+
+  return response.json(updated);
+});
+
 app.post("/session/:id/join", (request, response) => {
   const { listenerId, username } = request.body || {};
   const session = getRawSession(request.params.id);

@@ -57,7 +57,7 @@ export async function connectHostToLiveKitRoom({
   });
 
   onStatusChange?.("Publishing host audio");
-  await room.localParticipant.publishTrack(publishTrack, {
+  let publication = await room.localParticipant.publishTrack(publishTrack, {
     name: "together-live-audio"
   });
 
@@ -65,6 +65,22 @@ export async function connectHostToLiveKitRoom({
 
   return {
     room,
+    async replaceAudioTrack(nextMediaStream) {
+      const nextTrack = getAudioTrackFromStream(nextMediaStream);
+
+      if (!nextTrack) {
+        throw new Error("No replacement audio track is available for LiveKit publishing.");
+      }
+
+      if (publication?.track) {
+        await room.localParticipant.unpublishTrack(publication.track, false);
+      }
+
+      publication = await room.localParticipant.publishTrack(nextTrack, {
+        name: "together-live-audio"
+      });
+      onStatusChange?.("LiveKit host source switched");
+    },
     async disconnect() {
       room.disconnect();
     }

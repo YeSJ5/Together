@@ -296,10 +296,19 @@ export default function LiveSessionPage() {
           }
 
           if (event.type === "chat-message") {
+            const privateToHost =
+              Boolean(event.targetId) && event.targetId === (roomSnapshot?.hostId || listener.hostId);
+            const privateReplyFromHost =
+              Boolean(event.targetId) && event.targetId === listener.listenerId;
+
             pushChatMessage({
               id: `${event.id}-${event.senderId}`,
               senderName: event.payload.username || "Participant",
-              audience: event.targetId ? "Host only" : "Everyone",
+              audience: privateReplyFromHost
+                ? "Private reply"
+                : privateToHost
+                  ? "Host only"
+                  : "Everyone",
               message: event.payload.message
             });
           }

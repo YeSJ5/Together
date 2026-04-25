@@ -7,7 +7,8 @@ import {
   endSession,
   fetchSession,
   fetchSessionEvents,
-  sendSessionEvent
+  sendSessionEvent,
+  updateSessionSource
 } from "../lib/api";
 import { createAppId } from "../lib/ids";
 import { connectHostToLiveKitRoom, isLiveKitSession } from "../lib/livekitRoom";
@@ -52,6 +53,8 @@ export default function HostDashboardPage() {
   const [recentActivity, setRecentActivity] = useState([]);
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState("");
+  const [chatAudience, setChatAudience] = useState("everyone");
+  const [replyTarget, setReplyTarget] = useState(null);
   const [nativeCapabilities, setNativeCapabilities] = useState({
     nativeAndroid: false,
     systemAudioCapture: false
@@ -61,7 +64,8 @@ export default function HostDashboardPage() {
   const streamRef = useRef(null);
   const captureStreamRef = useRef(null);
   const nativeCaptureRef = useRef(null);
-  const audioContextRef = useRef(null);
+  const sourceAudioContextRef = useRef(null);
+  const diagnosticAudioContextRef = useRef(null);
   const audioAnalyserRef = useRef(null);
   const audioMeterFrameRef = useRef(null);
   const fileAudioElementRef = useRef(null);
@@ -158,6 +162,19 @@ export default function HostDashboardPage() {
       setUnreadChatCount(0);
     }
   }, [activeTab, unreadChatCount]);
+
+  useEffect(() => {
+    if (!replyTarget) {
+      return;
+    }
+
+    const stillConnected = connectedUsers.some((user) => user.id === replyTarget.id);
+
+    if (!stillConnected) {
+      setReplyTarget(null);
+      setChatAudience("everyone");
+    }
+  }, [connectedUsers, replyTarget]);
 
   useEffect(() => {
     if (typeof document !== "undefined") {
@@ -274,10 +291,25 @@ export default function HostDashboardPage() {
       }
 
       if (event.type === "chat-message") {
+        const sender = connectedUsers.find((user) => user.id === event.senderId);
         pushChatMessage({
           id: `${event.id}-${event.senderId}`,
+          senderId: event.senderId,
+          targetId: event.targetId || null,
           senderName: event.payload.username || "Participant",
-          audience: event.targetId ? "Host only" : "Everyone",
+          audience: event.targetId ? "Private to host" : "Everyone",
+          canReplyPrivately: Boolean(
+            event.targetId === hostIdRef.current && event.senderId !== hostIdRef.current
+          ),
+          replyTarget: sender
+            ? {
+                id: sender.id,
+                username: sender.username
+              }
+            : {
+                id: event.senderId,
+                username: event.payload.username || "Listener"
+              },
           message: event.payload.message
         });
       }
@@ -366,10 +398,15 @@ export default function HostDashboardPage() {
       audioMeterFrameRef.current = null;
     }
 
-    if (audioContextRef.current) {
-      audioContextRef.current.close().catch(() => {});
-      audioContextRef.current = null;
+    if (diagnosticAudioContextRef.current) {
+      diagnosticAudioContextRef.current.close().catch(() => {});
+      diagnosticAudioContextRef.current = null;
       audioAnalyserRef.current = null;
+    }
+
+    if (sourceAudioContextRef.current) {
+      sourceAudioContextRef.current.close().catch(() => {});
+      sourceAudioContextRef.current = null;
     }
 
     if (nativeCaptureRef.current) {
@@ -407,6 +444,8 @@ export default function HostDashboardPage() {
     setHostSignalDebug("Signaling idle");
     setRecentActivity([]);
     setChatMessages([]);
+    setReplyTarget(null);
+    setChatAudience("everyone");
   }
 
   function pushActivity(message) {
@@ -425,6 +464,48 @@ export default function HostDashboardPage() {
 
       return [message, ...current].slice(0, 20);
     });
+  }
+
+  function stopAudioDiagnostics() {
+    if (audioMeterFrameRef.current) {
+      cancelAnimationFrame(audioMeterFrameRef.current);
+      audioMeterFrameRef.current = null;
+    }
+
+    if (diagnosticAudioContextRef.current) {
+      diagnosticAudioContextRef.current.close().catch(() => {});
+      diagnosticAudioContextRef.current = null;
+    }
+
+    audioAnalyserRef.current = null;
+  }
+
+  async function stopCurrentSourceCapture() {
+    if (captureStreamRef.current) {
+      captureStreamRef.current.getTracks().forEach((track) => track.stop());
+      captureStreamRef.current = null;
+    }
+
+    if (nativeCaptureRef.current) {
+      await nativeCaptureRef.current.stop().catch(() => {});
+      nativeCaptureRef.current = null;
+    }
+
+    if (fileAudioElementRef.current) {
+      fileAudioElementRef.current.pause();
+      fileAudioElementRef.current.src = "";
+      fileAudioElementRef.current = null;
+    }
+
+    if (fileAudioUrlRef.current) {
+      URL.revokeObjectURL(fileAudioUrlRef.current);
+      fileAudioUrlRef.current = null;
+    }
+
+    if (sourceAudioContextRef.current) {
+      await sourceAudioContextRef.current.close().catch(() => {});
+      sourceAudioContextRef.current = null;
+    }
   }
 
   async function createFileStream(file) {
@@ -473,18 +554,13 @@ export default function HostDashboardPage() {
     source.connect(destination);
     source.connect(audioContext.destination);
 
-    fileAudioElementRef.current = audio;
-    captureStreamRef.current = destination.stream;
     await audio.play();
-
-    audio.addEventListener("ended", () => {
-      setStatus("Source finished");
-      setAudioDebug("The hosted audio file has finished playing");
-    });
 
     return {
       captureStream: destination.stream,
-      playbackContext: audioContext
+      playbackContext: audioContext,
+      audioElement: audio,
+      objectUrl
     };
   }
 
@@ -497,6 +573,8 @@ export default function HostDashboardPage() {
         return;
       }
 
+      stopAudioDiagnostics();
+
       const audioContext = new AudioContextClass();
       const source = audioContext.createMediaStreamSource(mediaStream);
       const analyser = audioContext.createAnalyser();
@@ -504,7 +582,7 @@ export default function HostDashboardPage() {
       source.connect(analyser);
 
       const samples = new Uint8Array(analyser.frequencyBinCount);
-      audioContextRef.current = audioContext;
+      diagnosticAudioContextRef.current = audioContext;
       audioAnalyserRef.current = analyser;
 
       const tick = () => {
@@ -529,6 +607,92 @@ export default function HostDashboardPage() {
     } catch (_diagnosticError) {
       setAudioDebug("Audio capture active, diagnostics unavailable");
     }
+  }
+
+  async function createSourceCapture(nextAudioSourceMode) {
+    if (nextAudioSourceMode === "device-audio" && nativeCapabilities.systemAudioCapture) {
+      const nativeCapture = await startNativeSystemAudioBridge();
+      return {
+        mediaStream: nativeCapture.stream,
+        captureStream: nativeCapture.stream,
+        nativeCapture
+      };
+    }
+
+    if (nextAudioSourceMode === "audio-file") {
+      if (!selectedAudioFile) {
+        throw new Error("Choose an audio file before starting or switching the session.");
+      }
+
+      const fileSource = await createFileStream(selectedAudioFile);
+      fileSource.audioElement.addEventListener("ended", () => {
+        setStatus("Source finished");
+        setAudioDebug("The hosted audio file has finished playing");
+      });
+
+      return {
+        mediaStream: fileSource.captureStream,
+        captureStream: fileSource.captureStream,
+        sourceAudioContext: fileSource.playbackContext,
+        fileAudioElement: fileSource.audioElement,
+        fileAudioUrl: fileSource.objectUrl
+      };
+    }
+
+    const mediaStream = await captureHostAudio(nextAudioSourceMode);
+    return {
+      mediaStream,
+      captureStream: mediaStream
+    };
+  }
+
+  function applyCaptureResources(resources) {
+    captureStreamRef.current = resources.captureStream || null;
+    nativeCaptureRef.current = resources.nativeCapture || null;
+    sourceAudioContextRef.current = resources.sourceAudioContext || null;
+    fileAudioElementRef.current = resources.fileAudioElement || null;
+    fileAudioUrlRef.current = resources.fileAudioUrl || null;
+  }
+
+  async function replaceActiveSessionTrack(nextMediaStream, nextAudioSourceMode) {
+    const nextTrack = nextMediaStream.getAudioTracks()[0];
+
+    if (!nextTrack) {
+      throw new Error(
+        "No audio track was shared. Make sure you choose a tab or window with audio enabled."
+      );
+    }
+
+    if (isLiveKitSession(session)) {
+      await liveKitSessionRef.current?.replaceAudioTrack(nextMediaStream);
+    } else {
+      const replacements = [];
+      peerConnectionsRef.current.forEach((peerConnection) => {
+        const audioSender = peerConnection
+          .getSenders()
+          .find((sender) => sender.track?.kind === "audio");
+
+        if (audioSender) {
+          replacements.push(audioSender.replaceTrack(nextTrack));
+        }
+      });
+
+      await Promise.allSettled(replacements);
+    }
+
+    const previousTracks = streamRef.current?.getTracks?.() || [];
+    streamRef.current = new MediaStream([nextTrack]);
+    previousTracks.forEach((track) => {
+      if (track !== nextTrack) {
+        track.stop();
+      }
+    });
+
+    startAudioDiagnostics(streamRef.current);
+    const updatedSession = await updateSessionSource(session.roomId, {
+      audioSourceMode: nextAudioSourceMode
+    });
+    setSession(updatedSession);
   }
 
   async function handleStartSession() {
@@ -572,21 +736,8 @@ export default function HostDashboardPage() {
         preferredTransport: canUseLiveKit ? "livekit" : "webrtc-direct"
       });
 
-      let mediaStream;
-
-      if (audioSourceMode === "device-audio" && nativeCapabilities.systemAudioCapture) {
-        const nativeCapture = await startNativeSystemAudioBridge();
-        nativeCaptureRef.current = nativeCapture;
-        mediaStream = nativeCapture.stream;
-        captureStreamRef.current = mediaStream;
-      } else if (audioSourceMode === "audio-file") {
-        const fileSource = await createFileStream(selectedAudioFile);
-        mediaStream = fileSource.captureStream;
-        audioContextRef.current = fileSource.playbackContext;
-      } else {
-        mediaStream = await captureHostAudio(audioSourceMode);
-        captureStreamRef.current = mediaStream;
-      }
+      const sourceCapture = await createSourceCapture(audioSourceMode);
+      const mediaStream = sourceCapture.mediaStream;
 
       const audioTracks = mediaStream.getAudioTracks();
 
@@ -597,6 +748,7 @@ export default function HostDashboardPage() {
       }
 
       streamRef.current = new MediaStream(audioTracks);
+      applyCaptureResources(sourceCapture);
       startAudioDiagnostics(streamRef.current);
       roomIdRef.current = createdSession.roomId;
 
@@ -657,6 +809,47 @@ export default function HostDashboardPage() {
     }
   }
 
+  async function handleSwitchSource() {
+    if (!session) {
+      return;
+    }
+
+    setIsStarting(true);
+    setError("");
+    setStatus("Switching source");
+
+    try {
+      if (
+        audioSourceMode === "device-audio" &&
+        !navigator.mediaDevices?.getDisplayMedia &&
+        !nativeCapabilities.systemAudioCapture
+      ) {
+        throw new Error(
+          "This browser does not support device audio capture. Use latest Chrome or Edge."
+        );
+      }
+
+      if (isMobileHost && audioSourceMode === "device-audio" && !nativeCapabilities.systemAudioCapture) {
+        throw new Error(
+          "Phone browsers do not reliably support device or tab audio sharing here. Use Microphone or Audio File mode."
+        );
+      }
+
+      const sourceCapture = await createSourceCapture(audioSourceMode);
+      await replaceActiveSessionTrack(sourceCapture.mediaStream, audioSourceMode);
+      await stopCurrentSourceCapture();
+      applyCaptureResources(sourceCapture);
+      setStatus("Source switched");
+      setAudioDebug(`Now sharing ${audioSourceMode === "audio-file" ? "an audio file" : audioSourceMode === "microphone" ? "microphone audio" : "device audio"}`);
+      pushActivity(`Host switched the source to ${audioSourceMode === "audio-file" ? "Audio File" : audioSourceMode === "microphone" ? "Microphone" : "Device Audio"}`);
+    } catch (switchError) {
+      setError(switchError.message || "Could not switch the live source.");
+      setStatus("Live room ready");
+    } finally {
+      setIsStarting(false);
+    }
+  }
+
   async function handleCopyJoinLink() {
     if (!joinUrl) {
       return;
@@ -698,9 +891,12 @@ export default function HostDashboardPage() {
     }
 
     try {
+      const targetId = chatAudience === "everyone" ? null : chatAudience;
+
       await sendSessionEvent(session.roomId, {
         type: "chat-message",
         senderId: hostIdRef.current,
+        targetId,
         payload: {
           username: sanitizeDisplayName(session.hostName || hostName, "Host"),
           message
@@ -708,6 +904,8 @@ export default function HostDashboardPage() {
       });
 
       setChatInput("");
+      setReplyTarget(null);
+      setChatAudience("everyone");
     } catch (_error) {
       setError("Message could not be sent.");
     }
@@ -838,6 +1036,12 @@ export default function HostDashboardPage() {
             : " Mobile browsers still do not reliably support full device audio output sharing."}
         </p>
       ) : null}
+
+      {session ? (
+        <p className="subtle-text">
+          This room stays live while you switch sources. Pick a new source above and tap <strong>Switch Source</strong> to change it without creating a new link.
+        </p>
+      ) : null}
     </div>
   );
 
@@ -904,14 +1108,51 @@ export default function HostDashboardPage() {
                 <span>{message.audience}</span>
               </div>
               <p>{message.message}</p>
+              {message.canReplyPrivately ? (
+                <button
+                  type="button"
+                  className="button-secondary diagnostics-toggle"
+                  onClick={() => {
+                    setReplyTarget(message.replyTarget);
+                    setChatAudience(message.replyTarget.id);
+                    setActiveTab("chat");
+                  }}
+                >
+                  Reply privately
+                </button>
+              ) : null}
             </div>
           ))
         )}
       </div>
       <div className="chat-compose">
+        <select
+          className="text-input chat-select"
+          value={chatAudience}
+          onChange={(event) => {
+            const nextAudience = event.target.value;
+            setChatAudience(nextAudience);
+            setReplyTarget(
+              nextAudience === "everyone"
+                ? null
+                : connectedUsers.find((user) => user.id === nextAudience) || null
+            );
+          }}
+        >
+          <option value="everyone">Message everyone</option>
+          {connectedUsers.map((user) => (
+            <option key={user.id} value={user.id}>
+              Reply to {user.username} only
+            </option>
+          ))}
+        </select>
         <input
           className="text-input"
-          placeholder="Send a message to the room"
+          placeholder={
+            replyTarget
+              ? `Reply privately to ${replyTarget.username}`
+              : "Send a message to the room"
+          }
           value={chatInput}
           maxLength={220}
           onChange={(event) => setChatInput(event.target.value)}
@@ -967,14 +1208,14 @@ export default function HostDashboardPage() {
               </div>
             </div>
 
-            <div className="mobile-primary-actions">
+          <div className="mobile-primary-actions">
               <button
                 type="button"
                 className="button-primary"
-                onClick={handleStartSession}
-                disabled={Boolean(session) || isStarting}
+                onClick={session ? handleSwitchSource : handleStartSession}
+                disabled={isStarting}
               >
-                {isStarting ? "Starting..." : "Go Live"}
+                {isStarting ? (session ? "Switching..." : "Starting...") : session ? "Switch Source" : "Go Live"}
               </button>
               <button
                 type="button"
@@ -1053,10 +1294,10 @@ export default function HostDashboardPage() {
               <button
                 type="button"
                 className="button-primary"
-                onClick={handleStartSession}
-                disabled={Boolean(session) || isStarting}
+                onClick={session ? handleSwitchSource : handleStartSession}
+                disabled={isStarting}
               >
-                {isStarting ? "Starting..." : "Go Live"}
+                {isStarting ? (session ? "Switching..." : "Starting...") : session ? "Switch Source" : "Go Live"}
               </button>
               <button
                 type="button"
@@ -1191,6 +1432,12 @@ export default function HostDashboardPage() {
                     : " Mobile browsers still do not reliably support full device audio output sharing."}
                 </p>
               ) : null}
+
+              {session ? (
+                <p className="subtle-text">
+                  This room stays live while you switch sources. Pick a new source above and tap <strong>Switch Source</strong> to change it without creating a new link.
+                </p>
+              ) : null}
             </div>
           ) : null}
 
@@ -1257,14 +1504,50 @@ export default function HostDashboardPage() {
                         <span>{message.audience}</span>
                       </div>
                       <p>{message.message}</p>
+                      {message.canReplyPrivately ? (
+                        <button
+                          type="button"
+                          className="button-secondary diagnostics-toggle"
+                          onClick={() => {
+                            setReplyTarget(message.replyTarget);
+                            setChatAudience(message.replyTarget.id);
+                          }}
+                        >
+                          Reply privately
+                        </button>
+                      ) : null}
                     </div>
                   ))
                 )}
               </div>
               <div className="chat-compose">
+                <select
+                  className="text-input chat-select"
+                  value={chatAudience}
+                  onChange={(event) => {
+                    const nextAudience = event.target.value;
+                    setChatAudience(nextAudience);
+                    setReplyTarget(
+                      nextAudience === "everyone"
+                        ? null
+                        : connectedUsers.find((user) => user.id === nextAudience) || null
+                    );
+                  }}
+                >
+                  <option value="everyone">Message everyone</option>
+                  {connectedUsers.map((user) => (
+                    <option key={user.id} value={user.id}>
+                      Reply to {user.username} only
+                    </option>
+                  ))}
+                </select>
                 <input
                   className="text-input"
-                  placeholder="Send a message to the room"
+                  placeholder={
+                    replyTarget
+                      ? `Reply privately to ${replyTarget.username}`
+                      : "Send a message to the room"
+                  }
                   value={chatInput}
                   maxLength={220}
                   onChange={(event) => setChatInput(event.target.value)}

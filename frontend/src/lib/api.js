@@ -30,6 +30,19 @@ export async function fetchSession(roomId) {
   return handleResponse(response);
 }
 
+export async function updateSessionSource(roomId, payload) {
+  const response = await fetch(`${API_BASE_URL}/session/${roomId}/source`, {
+    method: "PATCH",
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  return handleResponse(response);
+}
+
 export async function joinSession(roomId, payload) {
   const response = await fetch(`${API_BASE_URL}/session/${roomId}/join`, {
     method: "POST",
