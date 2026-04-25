@@ -7,8 +7,10 @@ import {
   fetchSessionEvents,
   joinSession,
   leaveSession,
+  leaveSessionInBackground,
   sendSessionEvent
 } from "../lib/api";
+import { connectListenerToLiveKitRoom, isLiveKitSession } from "../lib/livekitRoom";
 import {
   disableNativeBackgroundPlayback,
   enableNativeBackgroundPlayback,
@@ -28,6 +30,7 @@ export default function LiveSessionPage() {
   const peerConnectionRef = useRef(null);
   const pollingRef = useRef(null);
   const roomPollRef = useRef(null);
+  const liveKitSessionRef = useRef(null);
   const latestEventIdRef = useRef(0);
   const wakeLockRef = useRef(null);
   const connectedRef = useRef(false);
@@ -189,6 +192,7 @@ export default function LiveSessionPage() {
     }
     pushDiagnostic("Listener ready");
     let isCancelled = false;
+    let usesLiveKit = false;
 
     const peerConnection = createPeerConnection({
       onIceCandidate: (candidate) => {
@@ -267,7 +271,7 @@ export default function LiveSessionPage() {
         for (const event of data.events || []) {
           latestEventIdRef.current = Math.max(latestEventIdRef.current, event.id);
 
-          if (event.type === "signal:offer") {
+          if (!usesLiveKit && event.type === "signal:offer") {
             pushDiagnostic("Offer received from host");
             await peerConnection.setRemoteDescription(event.payload.offer);
             const answer = await peerConnection.createAnswer();
@@ -286,7 +290,7 @@ export default function LiveSessionPage() {
             });
           }
 
-          if (event.type === "signal:ice-candidate" && event.payload.candidate) {
+          if (!usesLiveKit && event.type === "signal:ice-candidate" && event.payload.candidate) {
             await peerConnection.addIceCandidate(event.payload.candidate);
             pushDiagnostic("ICE candidate added");
           }
@@ -315,7 +319,11 @@ export default function LiveSessionPage() {
 
         setStatus("Network issue");
         pushDiagnostic(`Polling error: ${pollError.message}`);
-        if (!connectedRef.current) {
+        if (usesLiveKit && connectedRef.current) {
+          setError("");
+          setStatus("Live");
+          setSessionNote("Audio is live. Room updates are retrying quietly in the background.");
+        } else if (!connectedRef.current) {
           setError("Phone could not connect to the live signaling server. Retry the session.");
           setSessionNote("The app is trying to reconnect to the host.");
         } else {
@@ -332,12 +340,53 @@ export default function LiveSessionPage() {
       setSessionNote("Joining the host room and waiting for the live audio stream.");
       pushDiagnostic("Joining room");
       const initialRoom = await fetchSession(roomId);
+      usesLiveKit = isLiveKitSession(initialRoom);
       setRoomSnapshot(initialRoom);
       await joinSession(roomId, {
         listenerId: listener.listenerId,
         username: listener.username
       });
       pushDiagnostic("Listener registered");
+
+      if (usesLiveKit) {
+        setStatus("Connecting audio");
+        setSessionNote("Connecting to the managed live audio room.");
+        liveKitSessionRef.current = await connectListenerToLiveKitRoom({
+          roomId,
+          participantId: listener.listenerId,
+          participantName: listener.username || "Guest Listener",
+          audioElement: audioRef.current,
+          onStatusChange: (message) => {
+            pushDiagnostic(message);
+          },
+          onAudioTrack: () => {
+            pushDiagnostic("Audio track received on listener");
+            setStatus("Ready to play");
+            setSessionNote(
+              "The host audio reached your device. If playback does not start, tap the play button once."
+            );
+          },
+          onPlaybackStarted: () => {
+            updateConnected(true);
+            setError("");
+            setStatus("Live");
+            updateAwaitingGesture(false);
+            setSessionNote("Connected. Your device is now playing the host audio.");
+            syncMediaSession("playing");
+            pushDiagnostic("Playback started successfully");
+          },
+          onPlaybackBlocked: () => {
+            setStatus("Tap play to start audio");
+            updateAwaitingGesture(true);
+            setSessionNote(
+              "Your phone wants a tap before live audio can start. Tap the button once to continue."
+            );
+            syncMediaSession("paused");
+            pushDiagnostic("Playback blocked until user taps play");
+          }
+        });
+      }
+
       pollEvents();
     }
 
@@ -354,8 +403,18 @@ export default function LiveSessionPage() {
         if (!isCancelled) {
           setRoomSnapshot(latestRoom);
         }
-      } catch (_error) {
-        // Session polling is best-effort here.
+      } catch (roomError) {
+        if (
+          !isCancelled &&
+          String(roomError.message || "").includes("Session not found")
+        ) {
+          updateConnected(false);
+          setStatus("Session ended");
+          setError("The host session is no longer available.");
+          setSessionNote("This room is no longer active.");
+          clearListenerSession();
+          return;
+        }
       } finally {
         if (!isCancelled) {
           roomPollRef.current = window.setTimeout(pollRoomState, 3000);
@@ -415,12 +474,17 @@ export default function LiveSessionPage() {
         clearTimeout(roomPollRef.current);
       }
 
-      leaveSession(roomId, {
+      leaveSessionInBackground(roomId, {
         listenerId: listener.listenerId
-      }).catch(() => {});
+      });
 
       if (peerConnectionRef.current) {
         peerConnectionRef.current.close();
+      }
+
+      if (liveKitSessionRef.current) {
+        liveKitSessionRef.current.disconnect().catch(() => {});
+        liveKitSessionRef.current = null;
       }
 
       if (wakeLockRef.current) {

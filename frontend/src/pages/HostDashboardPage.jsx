@@ -10,7 +10,9 @@ import {
   sendSessionEvent
 } from "../lib/api";
 import { createAppId } from "../lib/ids";
+import { connectHostToLiveKitRoom, isLiveKitSession } from "../lib/livekitRoom";
 import { getNativeAudioCapabilities, isNativeAndroidApp, startNativeSystemAudioBridge } from "../lib/nativeAudio";
+import { loadRealtimeConfig } from "../lib/realtime";
 import { sanitizeChatMessage, sanitizeDisplayName } from "../lib/sanitize";
 import { clearHostSession, saveHostSession } from "../lib/storage";
 import { useCompactViewport } from "../lib/useCompactViewport";
@@ -67,6 +69,8 @@ export default function HostDashboardPage() {
   const hostIdRef = useRef(makeHostId());
   const roomIdRef = useRef("");
   const peerConnectionsRef = useRef(new Map());
+  const liveKitSessionRef = useRef(null);
+  const realtimeConfigRef = useRef(null);
   const latestEventIdRef = useRef(0);
   const eventPollRef = useRef(null);
   const sessionPollRef = useRef(null);
@@ -130,6 +134,14 @@ export default function HostDashboardPage() {
       })
       .catch(() => {});
 
+    loadRealtimeConfig()
+      .then((config) => {
+        realtimeConfigRef.current = config;
+      })
+      .catch(() => {
+        realtimeConfigRef.current = null;
+      });
+
     return () => {
       teardownLocalSession();
     };
@@ -168,6 +180,7 @@ export default function HostDashboardPage() {
       return undefined;
     }
 
+    const usesLiveKit = isLiveKitSession(session);
     let isCancelled = false;
 
     async function processEvent(event) {
@@ -177,7 +190,7 @@ export default function HostDashboardPage() {
 
         pushActivity(`${displayName} joined the room`);
 
-        if (!streamRef.current || !roomIdRef.current) {
+        if (usesLiveKit || !streamRef.current || !roomIdRef.current) {
           return;
         }
 
@@ -221,6 +234,10 @@ export default function HostDashboardPage() {
       }
 
       if (event.type === "signal:answer") {
+        if (usesLiveKit) {
+          return;
+        }
+
         const peerConnection = peerConnectionsRef.current.get(event.senderId);
 
         if (peerConnection) {
@@ -229,6 +246,10 @@ export default function HostDashboardPage() {
       }
 
       if (event.type === "signal:ice-candidate" && event.payload.candidate) {
+        if (usesLiveKit) {
+          return;
+        }
+
         const peerConnection = peerConnectionsRef.current.get(event.senderId);
 
         if (peerConnection) {
@@ -240,7 +261,9 @@ export default function HostDashboardPage() {
         const disconnectedUser = connectedUsers.find(
           (user) => user.id === event.payload.listenerId
         );
-        const peerConnection = peerConnectionsRef.current.get(event.payload.listenerId);
+        const peerConnection = usesLiveKit
+          ? null
+          : peerConnectionsRef.current.get(event.payload.listenerId);
 
         pushActivity(`${disconnectedUser?.username || "A listener"} left the room`);
 
@@ -273,7 +296,7 @@ export default function HostDashboardPage() {
           await processEvent(event);
         }
 
-        setHostSignalDebug("Polling signaling active");
+        setHostSignalDebug(usesLiveKit ? "LiveKit room monitoring active" : "Polling signaling active");
       } catch (pollError) {
         if (!isCancelled) {
           setHostSignalDebug(`Polling error: ${pollError.message}`);
@@ -326,6 +349,11 @@ export default function HostDashboardPage() {
     if (streamRef.current) {
       streamRef.current.getTracks().forEach((track) => track.stop());
       streamRef.current = null;
+    }
+
+    if (liveKitSessionRef.current) {
+      liveKitSessionRef.current.disconnect().catch(() => {});
+      liveKitSessionRef.current = null;
     }
 
     if (captureStreamRef.current) {
@@ -510,6 +538,12 @@ export default function HostDashboardPage() {
     let createdSession = null;
 
     try {
+      const realtimeConfig =
+        realtimeConfigRef.current || (await loadRealtimeConfig().catch(() => null));
+      const canUseLiveKit = Boolean(
+        realtimeConfig?.transport?.liveKit?.enabled && realtimeConfig?.transport?.liveKit?.url
+      );
+
       if (
         audioSourceMode === "device-audio" &&
         !navigator.mediaDevices?.getDisplayMedia
@@ -534,7 +568,8 @@ export default function HostDashboardPage() {
       createdSession = await createSession({
         hostId: hostIdRef.current,
         hostName: sanitizeDisplayName(hostName, "Host"),
-        audioSourceMode
+        audioSourceMode,
+        preferredTransport: canUseLiveKit ? "livekit" : "webrtc-direct"
       });
 
       let mediaStream;
@@ -564,13 +599,28 @@ export default function HostDashboardPage() {
       streamRef.current = new MediaStream(audioTracks);
       startAudioDiagnostics(streamRef.current);
       roomIdRef.current = createdSession.roomId;
+
+      if (isLiveKitSession(createdSession)) {
+        liveKitSessionRef.current = await connectHostToLiveKitRoom({
+          roomId: createdSession.roomId,
+          participantId: hostIdRef.current,
+          participantName: sanitizeDisplayName(hostName, "Host"),
+          mediaStream: streamRef.current,
+          onStatusChange: (message) => {
+            setHostSignalDebug(message);
+          }
+        });
+      }
+
       setSession(createdSession);
       saveHostSession({
         roomId: createdSession.roomId,
         hostId: hostIdRef.current
       });
-      setStatus("Waiting for listeners");
-      setHostSignalDebug("Host polling ready");
+      setStatus(isLiveKitSession(createdSession) ? "Live room ready" : "Waiting for listeners");
+      setHostSignalDebug(
+        isLiveKitSession(createdSession) ? "LiveKit host transport active" : "Host polling ready"
+      );
 
       audioTracks[0].addEventListener("ended", () => {
         setStatus("Audio share stopped");
