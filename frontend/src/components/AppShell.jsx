@@ -1,9 +1,11 @@
 import { Link, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
+import InstallModal from "./InstallModal";
 
 export default function AppShell({ children }) {
   const location = useLocation();
   const isHome = location.pathname === "/";
+  const [isInstallModalOpen, setIsInstallModalOpen] = useState(false);
   const [theme, setTheme] = useState(() => {
     const savedTheme = localStorage.getItem("together-theme");
     if (savedTheme === "dark" || savedTheme === "light") {
@@ -40,6 +42,22 @@ export default function AppShell({ children }) {
           <div className="topbar-actions">
             <button
               type="button"
+              className="button-primary"
+              onClick={() => setIsInstallModalOpen(true)}
+              style={{
+                fontSize: "0.82rem",
+                padding: "6px 14px",
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "6px",
+                boxShadow: "0 0 15px rgba(16, 185, 129, 0.3)"
+              }}
+            >
+              <span>📲</span>
+              <span>Install App</span>
+            </button>
+            <button
+              type="button"
               className="button-secondary theme-toggle"
               onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
               style={{ fontSize: "0.82rem", padding: "6px 14px" }}
@@ -54,7 +72,12 @@ export default function AppShell({ children }) {
           </div>
         </header>
         {children}
+        <InstallModal
+          isOpen={isInstallModalOpen}
+          onClose={() => setIsInstallModalOpen(false)}
+        />
       </main>
     </div>
   );
 }
+

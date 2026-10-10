@@ -7,9 +7,10 @@
   "scope": "/",
   "display": "standalone",
   "display_override": ["standalone", "browser"],
-  "background_color": "#fff8ef",
-  "theme_color": "#132238",
-  "orientation": "portrait",
+  "background_color": "#070a10",
+  "theme_color": "#070a10",
+  "orientation": "portrait-primary",
+  "categories": ["music", "entertainment", "utilities"],
   "prefer_related_applications": false,
   "icons": [
     {
