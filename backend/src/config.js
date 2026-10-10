@@ -8,6 +8,7 @@ const LIVEKIT_API_SECRET = process.env.LIVEKIT_API_SECRET || "";
 const LIVEKIT_DEFAULT_ROOM_PREFIX = process.env.LIVEKIT_DEFAULT_ROOM_PREFIX || "together";
 const ENABLE_LIVEKIT = Boolean(LIVEKIT_URL && LIVEKIT_API_KEY && LIVEKIT_API_SECRET);
 const DEFAULT_PUBLIC_ORIGINS = [
+  "https://together-listen.vercel.app",
   "https://together-room.vercel.app",
   "https://together-audio-live.vercel.app",
   "https://together-puce.vercel.app"

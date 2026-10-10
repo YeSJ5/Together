@@ -51,7 +51,7 @@ export const SOCKET_PATH = import.meta.env.VITE_SOCKET_PATH || "/socket.io";
 export const PUBLIC_APP_URL =
   import.meta.env.VITE_PUBLIC_APP_URL ||
   (typeof window === "undefined"
-    ? "https://together-puce.vercel.app"
+    ? "https://together-listen.vercel.app"
     : window.location.origin);
 
 export const LIVEKIT_URL = import.meta.env.VITE_LIVEKIT_URL || "";
