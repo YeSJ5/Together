@@ -44,6 +44,8 @@ export default function LiveSessionPage() {
   const analyserRef = useRef(null);
   const animFrameRef = useRef(null);
   const chatScrollRef = useRef(null);
+  const roomContainerRef = useRef(null);
+  const accumulatedHueRef = useRef(150);
 
   // Auto-scroll chat
   useEffect(() => {
@@ -255,12 +257,36 @@ export default function LiveSessionPage() {
       const updateMeter = () => {
         if (!analyserRef.current) return;
         analyserRef.current.getByteFrequencyData(dataArray);
+
         let sum = 0;
+        let bassSum = 0;
         for (let i = 0; i < dataArray.length; i++) {
           sum += dataArray[i];
+          if (i < 4) bassSum += dataArray[i];
         }
+
         const avg = sum / dataArray.length;
+        const bass = Math.min(100, Math.round((bassSum / 4 / 128) * 100));
         setAudioLevel(Math.min(100, Math.round((avg / 128) * 100)));
+
+        // Dynamic DJ ambient color progression
+        if (avg > 3) {
+          accumulatedHueRef.current = (accumulatedHueRef.current + 0.8 + (bass > 40 ? 1.5 : 0)) % 360;
+        }
+
+        if (roomContainerRef.current) {
+          const primaryHue = Math.round(accumulatedHueRef.current);
+          const secondaryHue = (primaryHue + 60) % 360;
+          const glowAlpha = Math.min(0.65, (avg / 100) * 0.5);
+          const bassGlow = Math.min(0.7, (bass / 100) * 0.6);
+
+          roomContainerRef.current.style.setProperty("--dj-color-primary", `hsl(${primaryHue}, 90%, 55%)`);
+          roomContainerRef.current.style.setProperty("--dj-color-secondary", `hsl(${secondaryHue}, 95%, 60%)`);
+          roomContainerRef.current.style.setProperty("--dj-border-glow", `hsla(${primaryHue}, 90%, 55%, ${0.2 + glowAlpha})`);
+          roomContainerRef.current.style.setProperty("--dj-shadow-glow", `0 16px 45px rgba(0,0,0,0.7), 0 0 ${20 + bass * 0.5}px hsla(${primaryHue}, 90%, 55%, ${0.15 + bassGlow})`);
+          roomContainerRef.current.style.setProperty("--dj-disc-speed", `${Math.max(1.8, 6 - (avg / 100) * 4.2)}s`);
+        }
+
         animFrameRef.current = requestAnimationFrame(updateMeter);
       };
       updateMeter();
@@ -360,108 +386,103 @@ export default function LiveSessionPage() {
             </Link>
           </div>
         ) : (
-          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "24px" }}>
-            {/* Player Column */}
-            <div className="content-card" style={{ padding: "28px" }}>
-              {/* Header Info */}
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "20px" }}>
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-                    <span className="live-pill" style={{
-                      display: "inline-flex",
-                      alignItems: "center",
-                      gap: "6px",
-                      background: isConnected ? "rgba(46, 204, 113, 0.15)" : "rgba(243, 156, 18, 0.15)",
-                      color: isConnected ? "#27ae60" : "#d35400",
-                      padding: "4px 10px",
-                      borderRadius: "999px",
-                      fontSize: "0.82rem",
-                      fontWeight: 700
-                    }}>
-                      <span style={{
-                        width: "8px",
-                        height: "8px",
-                        borderRadius: "50%",
-                        background: isConnected ? "#2ecc71" : "#f39c12"
-                      }} />
-                      {isConnected ? "LIVE AUDIO" : "CONNECTING..."}
-                    </span>
-                    <span className="subtle-text" style={{ fontSize: "0.85rem" }}>
-                      {normalizedRoomId}
-                    </span>
+          <div ref={roomContainerRef} style={{ position: "relative" }}>
+            {/* DJ Reactive Ambient Stage Light Orbs */}
+            <div className="dj-ambient-stage">
+              <div className="dj-orb-1" />
+              <div className="dj-orb-2" />
+            </div>
+
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "24px" }}>
+              {/* Player Column */}
+              <div className="content-card dj-reactive-card" style={{ padding: "28px" }}>
+                {/* Header Info */}
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "20px" }}>
+                  <div>
+                    <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                      <span className="live-pill" style={{
+                        display: "inline-flex",
+                        alignItems: "center",
+                        gap: "6px",
+                        background: isConnected ? "rgba(46, 204, 113, 0.15)" : "rgba(243, 156, 18, 0.15)",
+                        color: isConnected ? "#27ae60" : "#d35400",
+                        padding: "4px 10px",
+                        borderRadius: "999px",
+                        fontSize: "0.82rem",
+                        fontWeight: 700
+                      }}>
+                        <span style={{
+                          width: "8px",
+                          height: "8px",
+                          borderRadius: "50%",
+                          background: isConnected ? "#2ecc71" : "#f39c12"
+                        }} />
+                        {isConnected ? "LIVE AUDIO" : "CONNECTING..."}
+                      </span>
+                      <span className="subtle-text" style={{ fontSize: "0.85rem" }}>
+                        {normalizedRoomId}
+                      </span>
+                    </div>
+                    <h1 style={{ fontSize: "1.4rem", margin: "4px 0 0" }}>
+                      {sessionData?.hostName ? `${sessionData.hostName}'s Room` : "Live Broadcast"}
+                    </h1>
                   </div>
-                  <h1 style={{ fontSize: "1.4rem", margin: "4px 0 0" }}>
-                    {sessionData?.hostName ? `${sessionData.hostName}'s Room` : "Live Broadcast"}
-                  </h1>
-                </div>
 
-                <button
-                  type="button"
-                  className="button-secondary"
-                  onClick={handleLeave}
-                  style={{ fontSize: "0.85rem", padding: "6px 12px", color: "#d9383a" }}
-                >
-                  Leave
-                </button>
-              </div>
-
-              {/* Autoplay Unlock Banner */}
-              {needsGesture && (
-                <div style={{
-                  background: "rgba(255, 140, 66, 0.12)",
-                  border: "1px solid rgba(255, 140, 66, 0.4)",
-                  padding: "16px",
-                  borderRadius: "14px",
-                  textAlign: "center",
-                  marginBottom: "20px"
-                }}>
-                  <p style={{ margin: "0 0 10px", fontSize: "0.95rem", fontWeight: 600 }}>
-                    Tap below to start listening to the audio stream:
-                  </p>
                   <button
                     type="button"
-                    className="button-primary"
-                    onClick={handleManualPlay}
-                    style={{ justifyContent: "center", width: "100%", padding: "12px" }}
+                    className="button-secondary"
+                    onClick={handleLeave}
+                    style={{ fontSize: "0.85rem", padding: "6px 12px", color: "#d9383a" }}
                   >
-                    ▶️ Tap to Start Audio
+                    Leave
                   </button>
                 </div>
-              )}
 
-              {/* Music Streaming Visualizer & Disc */}
-              <div style={{
-                background: "rgba(0, 0, 0, 0.25)",
-                border: "1px solid var(--border-subtle)",
-                padding: "24px 16px",
-                borderRadius: "18px",
-                textAlign: "center",
-                marginBottom: "24px",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                gap: "14px"
-              }}>
-                {/* Glowing vinyl disc */}
-                <div style={{
-                  width: "72px",
-                  height: "72px",
-                  borderRadius: "50%",
-                  background: "conic-gradient(from 0deg, var(--accent-primary), var(--accent-cyan), var(--accent-violet), var(--accent-primary))",
-                  boxShadow: isPlaying ? "0 0 24px var(--accent-primary-glow)" : "none",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  animation: isPlaying ? "rotateDisc 4s linear infinite" : "none"
-                }}>
+                {/* Autoplay Unlock Banner */}
+                {needsGesture && (
                   <div style={{
-                    width: "24px",
-                    height: "24px",
-                    borderRadius: "50%",
-                    background: "var(--bg-base)",
-                    border: "2px solid rgba(255,255,255,0.4)"
-                  }} />
-                </div>
+                    background: "rgba(255, 140, 66, 0.12)",
+                    border: "1px solid rgba(255, 140, 66, 0.4)",
+                    padding: "16px",
+                    borderRadius: "14px",
+                    textAlign: "center",
+                    marginBottom: "20px"
+                  }}>
+                    <p style={{ margin: "0 0 10px", fontSize: "0.95rem", fontWeight: 600 }}>
+                      Tap below to start listening to the audio stream:
+                    </p>
+                    <button
+                      type="button"
+                      className="button-primary"
+                      onClick={handleManualPlay}
+                      style={{ justifyContent: "center", width: "100%", padding: "12px" }}
+                    >
+                      ▶️ Tap to Start Audio
+                    </button>
+                  </div>
+                )}
+
+                {/* Music Streaming Visualizer & DJ Turntable */}
+                <div style={{
+                  background: "rgba(0, 0, 0, 0.3)",
+                  border: "1px solid var(--border-subtle)",
+                  padding: "24px 16px",
+                  borderRadius: "18px",
+                  textAlign: "center",
+                  marginBottom: "24px",
+                  display: "flex",
+                  flexDirection: "column",
+                  alignItems: "center",
+                  gap: "14px"
+                }}>
+                  {/* DJ Spinning Vinyl Turntable with Audio-Reactive Light Rings */}
+                  <div className="dj-turntable-wrapper">
+                    <div className="dj-light-ring-outer" />
+                    <div className="dj-light-ring-inner" />
+                    <div className="dj-vinyl-disc">
+                      <div className="dj-disc-center-label" />
+                    </div>
+                  </div>
 
                 {/* Animated EQ Bars */}
                 <div style={{
@@ -533,7 +554,7 @@ export default function LiveSessionPage() {
             </div>
 
             {/* Chat Column */}
-            <div className="content-card" style={{ padding: "24px", display: "flex", flexDirection: "column", height: "520px" }}>
+            <div className="content-card dj-reactive-card" style={{ padding: "24px", display: "flex", flexDirection: "column", height: "520px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", borderBottom: "1px solid rgba(0,0,0,0.06)", paddingBottom: "10px" }}>
                 <h3 style={{ margin: 0, fontSize: "1.1rem" }}>💬 Room Chat</h3>
                 <span className="subtle-text" style={{ fontSize: "0.82rem" }}>Live discussion</span>
@@ -605,8 +626,9 @@ export default function LiveSessionPage() {
               </form>
             </div>
           </div>
-        )}
-      </div>
-    </AppShell>
-  );
+        </div>
+      )}
+    </div>
+  </AppShell>
+);
 }

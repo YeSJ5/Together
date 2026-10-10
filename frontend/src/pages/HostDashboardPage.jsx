@@ -48,13 +48,14 @@ export default function HostDashboardPage() {
   // Origin for QR Code
   const [networkOrigin, setNetworkOrigin] = useState(window.location.origin);
 
-  // Mixer Audio Nodes & References
   const hostIdRef = useRef(createAppId("host"));
   const socketRef = useRef(null);
   const peerConnectionsRef = useRef(new Map());
   const chatScrollRef = useRef(null);
   const bgAudioRef = useRef(null);
   const wakeLockRef = useRef(null);
+  const roomContainerRef = useRef(null);
+  const accumulatedHueRef = useRef(150);
 
   // Core WebAudio Mixer Graph
   const audioContextRef = useRef(null);
@@ -155,10 +156,12 @@ export default function HostDashboardPage() {
       let sum = 0;
       let leftSum = 0;
       let rightSum = 0;
+      let bassSum = 0;
       const half = Math.floor(dataArray.length / 2);
 
       for (let i = 0; i < dataArray.length; i++) {
         sum += dataArray[i];
+        if (i < 4) bassSum += dataArray[i];
         if (i < half) leftSum += dataArray[i];
         else rightSum += dataArray[i];
       }
@@ -166,10 +169,29 @@ export default function HostDashboardPage() {
       const avg = sum / dataArray.length;
       const lAvg = leftSum / (half || 1);
       const rAvg = rightSum / (half || 1);
+      const bass = Math.min(100, Math.round((bassSum / 4 / 128) * 100));
 
       setMasterLevel(Math.min(100, Math.round((avg / 128) * 100)));
       setLeftVu(Math.min(100, Math.round((lAvg / 128) * 100)));
       setRightVu(Math.min(100, Math.round((rAvg / 128) * 100)));
+
+      // Dynamic DJ ambient color progression
+      if (avg > 3) {
+        accumulatedHueRef.current = (accumulatedHueRef.current + 0.8 + (bass > 40 ? 1.5 : 0)) % 360;
+      }
+
+      if (roomContainerRef.current) {
+        const primaryHue = Math.round(accumulatedHueRef.current);
+        const secondaryHue = (primaryHue + 60) % 360;
+        const glowAlpha = Math.min(0.65, (avg / 100) * 0.5);
+        const bassGlow = Math.min(0.7, (bass / 100) * 0.6);
+
+        roomContainerRef.current.style.setProperty("--dj-color-primary", `hsl(${primaryHue}, 90%, 55%)`);
+        roomContainerRef.current.style.setProperty("--dj-color-secondary", `hsl(${secondaryHue}, 95%, 60%)`);
+        roomContainerRef.current.style.setProperty("--dj-border-glow", `hsla(${primaryHue}, 90%, 55%, ${0.2 + glowAlpha})`);
+        roomContainerRef.current.style.setProperty("--dj-shadow-glow", `0 16px 45px rgba(0,0,0,0.7), 0 0 ${20 + bass * 0.5}px hsla(${primaryHue}, 90%, 55%, ${0.15 + bassGlow})`);
+        roomContainerRef.current.style.setProperty("--dj-disc-speed", `${Math.max(1.8, 6 - (avg / 100) * 4.2)}s`);
+      }
 
       animFrameRef.current = requestAnimationFrame(renderMeters);
     };
@@ -765,9 +787,16 @@ export default function HostDashboardPage() {
   // Active Broadcast Studio Console
   return (
     <AppShell>
-      <div style={{ maxWidth: "1120px", margin: "16px auto 0" }}>
+      <div ref={roomContainerRef} style={{ maxWidth: "1120px", margin: "16px auto 0", position: "relative" }}>
+        {/* DJ Reactive Ambient Stage Light Orbs */}
+        <div className="dj-ambient-stage">
+          <div className="dj-orb-1" />
+          <div className="dj-orb-2" />
+        </div>
+
         {/* Top Studio Bar */}
         <div
+          className="dj-reactive-card"
           style={{
             display: "flex",
             justifyContent: "space-between",
@@ -777,7 +806,6 @@ export default function HostDashboardPage() {
             marginBottom: "20px",
             padding: "16px 20px",
             background: "var(--bg-surface)",
-            border: "1px solid var(--border-subtle)",
             borderRadius: "var(--radius-card)"
           }}
         >
@@ -839,7 +867,18 @@ export default function HostDashboardPage() {
         {/* Studio Grid: Mixer Console (Left) + Backstage & Chat (Right) */}
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "24px" }}>
           {/* Main DJ Audio Mixer Desk */}
-          <div className="content-card" style={{ padding: "28px", display: "flex", flexDirection: "column", gap: "22px" }}>
+          <div className="content-card dj-reactive-card" style={{ padding: "28px", display: "flex", flexDirection: "column", gap: "22px" }}>
+            {/* DJ Spinning Vinyl Turntable with Audio-Reactive Light Rings */}
+            <div style={{ display: "flex", justifyContent: "center", padding: "6px 0 12px" }}>
+              <div className="dj-turntable-wrapper">
+                <div className="dj-light-ring-outer" />
+                <div className="dj-light-ring-inner" />
+                <div className="dj-vinyl-disc">
+                  <div className="dj-disc-center-label" />
+                </div>
+              </div>
+            </div>
+
             <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                 <span style={{ fontSize: "1.3rem" }}>🎛️</span>
@@ -1131,7 +1170,7 @@ export default function HostDashboardPage() {
           {/* Right Column: QR Backstage Pass, Listeners & Room Chat */}
           <div style={{ display: "flex", flexDirection: "column", gap: "24px" }}>
             {/* Backstage Pass QR Card */}
-            <div className="content-card" style={{ padding: "24px", textAlign: "center" }}>
+            <div className="content-card dj-reactive-card" style={{ padding: "24px", textAlign: "center" }}>
               <h3 style={{ fontSize: "1.1rem", fontWeight: 700, margin: "0 0 4px" }}>
                 Listener Backstage Pass
               </h3>
@@ -1213,7 +1252,7 @@ export default function HostDashboardPage() {
             </div>
 
             {/* Room Chat Card */}
-            <div className="content-card" style={{ padding: "20px", display: "flex", flexDirection: "column", height: "360px" }}>
+            <div className="content-card dj-reactive-card" style={{ padding: "20px", display: "flex", flexDirection: "column", height: "360px" }}>
               <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px", borderBottom: "1px solid var(--border-subtle)", paddingBottom: "8px" }}>
                 <h3 style={{ margin: 0, fontSize: "1rem" }}>💬 Studio Chat</h3>
                 <span className="subtle-text" style={{ fontSize: "0.75rem" }}>Live reactions</span>
