@@ -1,7 +1,6 @@
 import { useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import AppShell from "../components/AppShell";
-import InstallModal from "../components/InstallModal";
 
 export default function HomePage() {
   const navigate = useNavigate();
@@ -9,7 +8,6 @@ export default function HomePage() {
   const [audioSource, setAudioSource] = useState("microphone");
   const [joinRoomCode, setJoinRoomCode] = useState("");
   const [joinError, setJoinError] = useState("");
-  const [showInstallModal, setShowInstallModal] = useState(false);
 
   function handleHostStart(e) {
     e.preventDefault();
@@ -72,41 +70,12 @@ export default function HomePage() {
         <p className="subtle-text" style={{
           fontSize: "1.1rem",
           maxWidth: "600px",
-          margin: "0 auto 24px",
+          margin: "0 auto 28px",
           lineHeight: 1.6
         }}>
           One host broadcasts device audio, YouTube, Spotify, or microphone.
           Nearby listeners join instantly with a QR scan or station code.
         </p>
-
-        {/* Universal Download & Install button */}
-        <div style={{ display: "flex", justifyContent: "center", gap: "12px", marginBottom: "32px", flexWrap: "wrap" }}>
-          <button
-            type="button"
-            className="button-primary"
-            onClick={() => setShowInstallModal(true)}
-            style={{
-              padding: "12px 24px",
-              fontSize: "0.95rem",
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "10px",
-              boxShadow: "0 0 25px rgba(16, 185, 129, 0.4)"
-            }}
-          >
-            <span style={{ fontSize: "1.2rem" }}>📲</span>
-            <span style={{ fontWeight: 700 }}>Download & Install App</span>
-            <span style={{
-              fontSize: "0.75rem",
-              fontWeight: 600,
-              background: "rgba(255, 255, 255, 0.2)",
-              padding: "2px 8px",
-              borderRadius: "999px"
-            }}>
-              iOS • Android • PC
-            </span>
-          </button>
-        </div>
 
         {/* Animated equalizer waves */}
         <div style={{ display: "flex", justifyContent: "center", alignItems: "center", gap: "5px", height: "32px", marginBottom: "36px" }}>
@@ -305,11 +274,6 @@ export default function HomePage() {
         <span>•</span>
         <span>🔋 BACKGROUND & LOCK-SCREEN ACTIVE</span>
       </section>
-
-      <InstallModal
-        isOpen={showInstallModal}
-        onClose={() => setShowInstallModal(false)}
-      />
     </AppShell>
   );
 }
