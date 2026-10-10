@@ -55,6 +55,7 @@ export default function HostDashboardPage() {
   const fileObjectUrlRef = useRef(null);
   const nativeBridgeRef = useRef(null);
   const chatScrollRef = useRef(null);
+  const bgAudioRef = useRef(null);
 
   // Fetch runtime LAN origin for mobile QR compatibility
   useEffect(() => {
@@ -178,14 +179,6 @@ export default function HostDashboardPage() {
         nativeBridgeRef.current = nativeBridge;
         mediaStream = nativeBridge.stream;
       } else {
-        if (
-          audioSourceMode === "device-audio" &&
-          /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
-        ) {
-          throw new Error(
-            "Phone browsers (Chrome/Safari) cannot capture audio from other apps (YouTube, Spotify) due to Android/iOS OS security. To share all audio from apps on phone, launch the TOGETHER Android App!"
-          );
-        }
         mediaStream = await captureHostAudio(audioSourceMode);
       }
 
@@ -200,6 +193,28 @@ export default function HostDashboardPage() {
       });
 
       setSession(newSession);
+
+      // Keep browser alive while host switches to other apps or locks screen
+      try {
+        const bgAudio = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAP8A/w==");
+        bgAudio.loop = true;
+        bgAudio.volume = 0.001;
+        bgAudio.play().catch(() => {});
+        bgAudioRef.current = bgAudio;
+
+        if ("mediaSession" in navigator) {
+          navigator.mediaSession.metadata = new MediaMetadata({
+            title: "TOGETHER Studio • Broadcasting",
+            artist: sanitizeDisplayName(hostName, "Host"),
+            album: `Room ${newSession.roomId}`
+          });
+          navigator.mediaSession.playbackState = "playing";
+        }
+
+        if ("wakeLock" in navigator) {
+          navigator.wakeLock.request("screen").catch(() => {});
+        }
+      } catch (_bgErr) {}
 
       if (isNativeAndroidApp()) {
         enableNativeBackgroundPlayback({
@@ -335,6 +350,17 @@ export default function HostDashboardPage() {
     if (nativeBridgeRef.current) {
       nativeBridgeRef.current.stop().catch(() => {});
       nativeBridgeRef.current = null;
+    }
+
+    if (bgAudioRef.current) {
+      bgAudioRef.current.pause();
+      bgAudioRef.current = null;
+    }
+
+    if ("mediaSession" in navigator) {
+      try {
+        navigator.mediaSession.playbackState = "none";
+      } catch (_e) {}
     }
 
     if (isNativeAndroidApp()) {

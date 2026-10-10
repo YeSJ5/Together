@@ -26,8 +26,7 @@ export default function AppShell({ children }) {
       if (typeof window === "undefined") return false;
       return (
         window.matchMedia("(display-mode: standalone)").matches ||
-        window.navigator.standalone === true ||
-        document.referrer.includes("android-app://")
+        window.navigator.standalone === true
       );
     };
 
@@ -116,34 +115,35 @@ export default function AppShell({ children }) {
           <div className="topbar-actions" style={{ position: "relative" }}>
             {/* Small install icon button at top - hidden once installed */}
             {!isInstalled && (
-              <div style={{ position: "relative" }}>
+              <div style={{ position: "relative", flexShrink: 0 }}>
                 <button
                   type="button"
                   onClick={handleInstallClick}
                   title="Install App"
                   aria-label="Install App"
                   style={{
-                    width: "34px",
-                    height: "34px",
-                    borderRadius: "50%",
-                    display: "flex",
+                    display: "inline-flex",
                     alignItems: "center",
-                    justifyContent: "center",
-                    background: "rgba(16, 185, 129, 0.12)",
-                    border: "1px solid rgba(16, 185, 129, 0.4)",
+                    gap: "6px",
+                    padding: "6px 12px",
+                    borderRadius: "999px",
+                    background: "rgba(16, 185, 129, 0.2)",
+                    border: "1px solid rgba(16, 185, 129, 0.5)",
                     color: "var(--accent-primary)",
                     cursor: "pointer",
-                    padding: 0,
+                    fontSize: "0.8rem",
+                    fontWeight: 700,
+                    flexShrink: 0,
                     transition: "all 0.2s ease"
                   }}
                 >
                   <svg
-                    width="16"
-                    height="16"
+                    width="15"
+                    height="15"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
-                    strokeWidth="2.4"
+                    strokeWidth="2.5"
                     strokeLinecap="round"
                     strokeLinejoin="round"
                   >
@@ -151,6 +151,7 @@ export default function AppShell({ children }) {
                     <polyline points="7 10 12 15 17 10" />
                     <line x1="12" y1="15" x2="12" y2="3" />
                   </svg>
+                  <span>Install</span>
                 </button>
 
                 {/* Minimal auto-dismiss tooltip only if manual step is needed (iOS) */}

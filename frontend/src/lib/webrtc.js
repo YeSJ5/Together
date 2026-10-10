@@ -25,42 +25,54 @@ export function createPeerConnection({ onIceCandidate, onTrack }) {
 }
 
 export async function captureHostAudio(audioSourceMode) {
+  // If microphone / device speaker mode: use pure uncompressed audio without noise cancellation
+  // (Noise cancellation actively suppresses and erases music from YouTube, Spotify, and instruments)
   if (audioSourceMode === "microphone") {
     return navigator.mediaDevices.getUserMedia({
       audio: {
-        echoCancellation: true,
-        noiseSuppression: true,
-        autoGainControl: true
+        echoCancellation: false,
+        noiseSuppression: false,
+        autoGainControl: false,
+        channelCount: { ideal: 2 },
+        sampleRate: { ideal: 48000 }
       },
       video: false
     });
   }
 
-  if (!navigator.mediaDevices?.getDisplayMedia) {
-    throw new Error("Device audio capture is not supported on this browser. Try Google Chrome or Microsoft Edge.");
+  // Device / System Audio (Apps, Tabs, Screen)
+  if (navigator.mediaDevices?.getDisplayMedia) {
+    try {
+      const displayStream = await navigator.mediaDevices.getDisplayMedia({
+        video: true,
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false
+        }
+      });
+
+      const audioTracks = displayStream.getAudioTracks();
+      if (audioTracks.length > 0) {
+        // Stop video immediately to save battery, memory, and bandwidth
+        displayStream.getVideoTracks().forEach((track) => track.stop());
+        return new MediaStream(audioTracks);
+      }
+    } catch (_err) {
+      // User cancelled or browser rejected getDisplayMedia; fallback below
+    }
   }
 
-  const displayStream = await navigator.mediaDevices.getDisplayMedia({
-    video: true,
+  // Fallback: Pure stereo audio capture without music filters
+  return navigator.mediaDevices.getUserMedia({
     audio: {
       echoCancellation: false,
       noiseSuppression: false,
-      autoGainControl: false
-    }
+      autoGainControl: false,
+      channelCount: { ideal: 2 },
+      sampleRate: { ideal: 48000 }
+    },
+    video: false
   });
-
-  const audioTracks = displayStream.getAudioTracks();
-
-  if (audioTracks.length === 0) {
-    displayStream.getTracks().forEach((track) => track.stop());
-    throw new Error(
-      "No audio was shared. Make sure to check the 'Share audio' / 'Also share tab audio' checkbox in the browser popup."
-    );
-  }
-
-  // Stop video tracks immediately to prevent unnecessary CPU and network usage
-  displayStream.getVideoTracks().forEach((track) => track.stop());
-
-  return new MediaStream(audioTracks);
 }
 
