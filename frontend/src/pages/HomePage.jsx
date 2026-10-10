@@ -12,7 +12,7 @@ export default function HomePage() {
   function handleHostStart(e) {
     e.preventDefault();
     const nameParam = hostName.trim() ? encodeURIComponent(hostName.trim()) : "Host";
-    navigate(`/host?name=${nameParam}&source=${audioSource}`);
+    navigate(`/host?name=${nameParam}&source=universal`);
   }
 
   function handleJoinSubmit(e) {
@@ -119,8 +119,8 @@ export default function HomePage() {
                 🎙️
               </div>
               <div>
-                <h2 style={{ fontSize: "1.35rem", fontWeight: 700, margin: 0 }}>Host Broadcast</h2>
-                <span className="subtle-text" style={{ fontSize: "0.82rem" }}>Go live and share audio</span>
+                <h2 style={{ fontSize: "1.35rem", fontWeight: 700, margin: 0 }}>Live Broadcast Studio</h2>
+                <span className="subtle-text" style={{ fontSize: "0.82rem" }}>Universal multi-source audio stage</span>
               </div>
             </div>
             <span style={{
@@ -137,10 +137,10 @@ export default function HomePage() {
 
           <form onSubmit={handleHostStart} style={{ display: "flex", flexDirection: "column", gap: "18px" }}>
             <label className="field-block">
-              <span className="field-label">Host Display Name</span>
+              <span className="field-label">Host / DJ Name</span>
               <input
                 type="text"
-                placeholder="e.g. Host / DJ"
+                placeholder="e.g. DJ Pulse / Host"
                 value={hostName}
                 onChange={(e) => setHostName(e.target.value)}
                 maxLength={30}
@@ -148,37 +148,32 @@ export default function HomePage() {
               />
             </label>
 
-            <div className="field-block">
-              <span className="field-label">Audio Source</span>
-              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginTop: "4px" }}>
-                <button
-                  type="button"
-                  className={`button-secondary ${audioSource === "microphone" ? "active-pill" : ""}`}
-                  onClick={() => setAudioSource("microphone")}
-                  style={{ padding: "10px 6px", fontSize: "0.85rem" }}
-                >
-                  🎤 Mic
-                </button>
-                <button
-                  type="button"
-                  className={`button-secondary ${audioSource === "device-audio" ? "active-pill" : ""}`}
-                  onClick={() => setAudioSource("device-audio")}
-                  style={{ padding: "10px 6px", fontSize: "0.85rem" }}
-                >
-                  💻 Apps/Tab
-                </button>
-                <button
-                  type="button"
-                  className={`button-secondary ${audioSource === "audio-file" ? "active-pill" : ""}`}
-                  onClick={() => setAudioSource("audio-file")}
-                  style={{ padding: "10px 6px", fontSize: "0.85rem" }}
-                >
-                  📁 File
-                </button>
+            {/* Universal features included in one link */}
+            <div style={{
+              display: "flex",
+              flexDirection: "column",
+              gap: "8px",
+              padding: "14px",
+              borderRadius: "var(--radius-control)",
+              background: "rgba(255, 255, 255, 0.03)",
+              border: "1px solid var(--border-subtle)",
+              fontSize: "0.83rem"
+            }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span>🎵</span>
+                <span><strong>All Music Sources Open:</strong> Spotify, YouTube, games & tabs</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span>📁</span>
+                <span><strong>Audio File Deck:</strong> Load & play local MP3 / WAV anytime</span>
+              </div>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span>🎙️</span>
+                <span><strong>Voice Mic:</strong> Muted by default (tap to speak on air)</span>
               </div>
             </div>
 
-            <button type="submit" className="button-primary" style={{ marginTop: "8px", width: "100%", padding: "14px" }}>
+            <button type="submit" className="button-primary" style={{ marginTop: "4px", width: "100%", padding: "14px" }}>
               Launch Broadcast Studio &rarr;
             </button>
           </form>
