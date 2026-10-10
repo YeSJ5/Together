@@ -1,1583 +1,807 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { Link, useSearchParams } from "react-router-dom";
 import QRCode from "react-qr-code";
 import AppShell from "../components/AppShell";
-import StatusBadge from "../components/StatusBadge";
-import {
-  createSession,
-  endSession,
-  fetchSession,
-  fetchSessionEvents,
-  sendSessionEvent,
-  updateSessionSource
-} from "../lib/api";
+import { createSession, endSession } from "../lib/api";
 import { createAppId } from "../lib/ids";
-import { connectHostToLiveKitRoom, isLiveKitSession } from "../lib/livekitRoom";
-import { getNativeAudioCapabilities, isNativeAndroidApp, startNativeSystemAudioBridge } from "../lib/nativeAudio";
-import { loadRealtimeConfig } from "../lib/realtime";
-import { sanitizeChatMessage, sanitizeDisplayName } from "../lib/sanitize";
-import { clearHostSession, saveHostSession } from "../lib/storage";
-import { useCompactViewport } from "../lib/useCompactViewport";
-import { useNavigationLock } from "../lib/useNavigationLock";
+import { sanitizeDisplayName } from "../lib/sanitize";
+import { createSocket } from "../lib/socket";
 import { captureHostAudio, createPeerConnection } from "../lib/webrtc";
-
-function makeHostId() {
-  return createAppId("host");
-}
-
-function detectMobileHost() {
-  if (typeof navigator === "undefined") {
-    return false;
-  }
-
-  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
-}
+import {
+  disableNativeBackgroundPlayback,
+  enableNativeBackgroundPlayback,
+  isNativeAndroidApp,
+  startNativeSystemAudioBridge
+} from "../lib/nativeAudio";
 
 export default function HostDashboardPage() {
-  const isMobileHost = detectMobileHost();
-  const isCompactViewport = useCompactViewport();
-  const [hostName, setHostName] = useState("Host");
-  const [audioSourceMode, setAudioSourceMode] = useState(
-    isMobileHost ? "microphone" : "device-audio"
-  );
-  const [selectedAudioFile, setSelectedAudioFile] = useState(null);
+  const [searchParams] = useSearchParams();
+  const initialName = searchParams.get("name") || "";
+  const initialSource = searchParams.get("source") || "microphone";
+
+  const [hostName, setHostName] = useState(initialName || "Host");
+  const [audioSourceMode, setAudioSourceMode] = useState(initialSource);
+  const [selectedFile, setSelectedFile] = useState(null);
+
   const [session, setSession] = useState(null);
-  const [connectedUsers, setConnectedUsers] = useState([]);
-  const [error, setError] = useState("");
-  const [status, setStatus] = useState("Ready to start");
   const [isStarting, setIsStarting] = useState(false);
-  const [audioDebug, setAudioDebug] = useState("No active capture");
-  const [hostSignalDebug, setHostSignalDebug] = useState("Signaling idle");
-  const [publicJoinOrigin, setPublicJoinOrigin] = useState(window.location.origin);
-  const [showHostDetails, setShowHostDetails] = useState(false);
-  const [copiedState, setCopiedState] = useState("");
-  const [recentActivity, setRecentActivity] = useState([]);
+  const [error, setError] = useState("");
+  const [copied, setCopied] = useState(false);
+  const [isMuted, setIsMuted] = useState(false);
+
+  // Stats & Chat
+  const [connectedUsers, setConnectedUsers] = useState([]);
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState("");
-  const [chatAudience, setChatAudience] = useState("everyone");
-  const [replyTarget, setReplyTarget] = useState(null);
-  const [nativeCapabilities, setNativeCapabilities] = useState({
-    nativeAndroid: false,
-    systemAudioCapture: false
-  });
-  const [activeTab, setActiveTab] = useState("studio");
-  const [unreadChatCount, setUnreadChatCount] = useState(0);
+  const [audioLevel, setAudioLevel] = useState(0);
+
+  // File audio playback state
+  const [isFilePlaying, setIsFilePlaying] = useState(false);
+  const [fileProgress, setFileProgress] = useState(0);
+  const [fileDuration, setFileDuration] = useState(0);
+
+  // Network origin for QR code
+  const [networkOrigin, setNetworkOrigin] = useState(window.location.origin);
+
+  // References
+  const hostIdRef = useRef(createAppId("host"));
+  const socketRef = useRef(null);
   const streamRef = useRef(null);
-  const captureStreamRef = useRef(null);
-  const nativeCaptureRef = useRef(null);
-  const sourceAudioContextRef = useRef(null);
-  const diagnosticAudioContextRef = useRef(null);
-  const audioAnalyserRef = useRef(null);
-  const audioMeterFrameRef = useRef(null);
-  const fileAudioElementRef = useRef(null);
-  const fileAudioUrlRef = useRef(null);
-  const hostIdRef = useRef(makeHostId());
-  const roomIdRef = useRef("");
   const peerConnectionsRef = useRef(new Map());
-  const liveKitSessionRef = useRef(null);
-  const realtimeConfigRef = useRef(null);
-  const latestEventIdRef = useRef(0);
-  const eventPollRef = useRef(null);
-  const sessionPollRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const analyserRef = useRef(null);
+  const animFrameRef = useRef(null);
+  const fileAudioRef = useRef(null);
+  const fileObjectUrlRef = useRef(null);
+  const nativeBridgeRef = useRef(null);
+  const chatScrollRef = useRef(null);
 
-  const joinUrl = useMemo(() => {
-    if (!session) {
-      return "";
-    }
-
-    return `${publicJoinOrigin}/join/${session.roomId}`;
-  }, [session]);
-
-  const participantList = useMemo(() => {
-    if (!session) {
-      return [];
-    }
-
-    return [
-      {
-        id: session.hostId,
-        username: session.hostName || hostName || "Host",
-        role: "Host"
-      },
-      ...connectedUsers.map((user) => ({
-        ...user,
-        role: "Listener"
-      }))
-    ];
-  }, [connectedUsers, hostName, session]);
-
-  const canUseDeviceAudio =
-    nativeCapabilities.systemAudioCapture || Boolean(navigator.mediaDevices?.getDisplayMedia);
-
-  useNavigationLock(
-    Boolean(session),
-    "End the current session before leaving this page."
-  );
-
+  // Fetch runtime LAN origin for mobile QR compatibility
   useEffect(() => {
     fetch("/api/runtime")
-      .then((response) => response.json())
+      .then((res) => res.json())
       .then((data) => {
-        if (window.location.hostname === "localhost" && data.lanOrigin) {
-          setPublicJoinOrigin(data.lanOrigin);
-          return;
-        }
-
-        setPublicJoinOrigin(data.currentOrigin || window.location.origin);
-      })
-      .catch(() => {
-        setPublicJoinOrigin(window.location.origin);
-      });
-
-    getNativeAudioCapabilities()
-      .then((capabilities) => {
-        setNativeCapabilities(capabilities);
-
-        if (isMobileHost && capabilities.systemAudioCapture) {
-          setAudioSourceMode("device-audio");
+        if (data.lanOrigin && window.location.hostname === "localhost") {
+          setNetworkOrigin(data.lanOrigin);
+        } else {
+          setNetworkOrigin(data.currentOrigin || window.location.origin);
         }
       })
       .catch(() => {});
-
-    loadRealtimeConfig()
-      .then((config) => {
-        realtimeConfigRef.current = config;
-      })
-      .catch(() => {
-        realtimeConfigRef.current = null;
-      });
-
-    return () => {
-      teardownLocalSession();
-    };
   }, []);
 
+  const joinUrl = useMemo(() => {
+    if (!session?.roomId) return "";
+    return `${networkOrigin}/join/${session.roomId}`;
+  }, [session, networkOrigin]);
+
+  // Auto-scroll chat
   useEffect(() => {
-    if (!isCompactViewport && activeTab === "access") {
-      setActiveTab("studio");
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
     }
-  }, [activeTab, isCompactViewport]);
+  }, [chatMessages]);
 
-  useEffect(() => {
-    if (activeTab === "chat" && unreadChatCount) {
-      setUnreadChatCount(0);
-    }
-  }, [activeTab, unreadChatCount]);
+  // Audio level visualizer loop
+  function setupVisualizer(stream) {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
 
-  useEffect(() => {
-    if (!replyTarget) {
-      return;
-    }
+      const ctx = new AudioCtx();
+      audioContextRef.current = ctx;
 
-    const stillConnected = connectedUsers.some((user) => user.id === replyTarget.id);
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 64;
+      source.connect(analyser);
+      analyserRef.current = analyser;
 
-    if (!stillConnected) {
-      setReplyTarget(null);
-      setChatAudience("everyone");
-    }
-  }, [connectedUsers, replyTarget]);
-
-  useEffect(() => {
-    if (typeof document !== "undefined") {
-      document.title = unreadChatCount
-        ? `(${unreadChatCount}) TOGETHER | Listen Together. Instantly.`
-        : "TOGETHER | Listen Together. Instantly.";
-    }
-
-    if ("setAppBadge" in navigator) {
-      if (unreadChatCount > 0) {
-        navigator.setAppBadge(unreadChatCount).catch(() => {});
-      } else if ("clearAppBadge" in navigator) {
-        navigator.clearAppBadge().catch(() => {});
-      }
-    }
-  }, [unreadChatCount]);
-
-  useEffect(() => {
-    if (!session?.roomId) {
-      return undefined;
-    }
-
-    const usesLiveKit = isLiveKitSession(session);
-    let isCancelled = false;
-
-    async function processEvent(event) {
-      if (event.type === "listener-joined-room") {
-        const listenerId = event.payload.listenerId;
-        const displayName = event.payload.username || "Listener";
-
-        pushActivity(`${displayName} joined the room`);
-
-        if (usesLiveKit || !streamRef.current || !roomIdRef.current) {
-          return;
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const updateMeter = () => {
+        if (!analyserRef.current) return;
+        analyserRef.current.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          sum += dataArray[i];
         }
-
-        try {
-          const peerConnection = createPeerConnection({
-            onIceCandidate: (candidate) => {
-              sendSessionEvent(roomIdRef.current, {
-                type: "signal:ice-candidate",
-                senderId: hostIdRef.current,
-                targetId: listenerId,
-                payload: {
-                  candidate
-                }
-              }).catch(() => {});
-            },
-            onTrack: () => {}
-          });
-
-          streamRef.current.getTracks().forEach((track) => {
-            peerConnection.addTrack(track, streamRef.current);
-          });
-
-          peerConnectionsRef.current.set(listenerId, peerConnection);
-          const offer = await peerConnection.createOffer({
-            offerToReceiveAudio: false,
-            offerToReceiveVideo: false
-          });
-          await peerConnection.setLocalDescription(offer);
-
-          await sendSessionEvent(roomIdRef.current, {
-            type: "signal:offer",
-            senderId: hostIdRef.current,
-            targetId: listenerId,
-            payload: {
-              offer
-            }
-          });
-        } catch (_offerError) {
-          setError("Could not connect a listener to the live audio stream.");
-        }
-      }
-
-      if (event.type === "signal:answer") {
-        if (usesLiveKit) {
-          return;
-        }
-
-        const peerConnection = peerConnectionsRef.current.get(event.senderId);
-
-        if (peerConnection) {
-          await peerConnection.setRemoteDescription(event.payload.answer);
-        }
-      }
-
-      if (event.type === "signal:ice-candidate" && event.payload.candidate) {
-        if (usesLiveKit) {
-          return;
-        }
-
-        const peerConnection = peerConnectionsRef.current.get(event.senderId);
-
-        if (peerConnection) {
-          await peerConnection.addIceCandidate(event.payload.candidate);
-        }
-      }
-
-      if (event.type === "listener-disconnected") {
-        const disconnectedUser = connectedUsers.find(
-          (user) => user.id === event.payload.listenerId
-        );
-        const peerConnection = usesLiveKit
-          ? null
-          : peerConnectionsRef.current.get(event.payload.listenerId);
-
-        pushActivity(`${disconnectedUser?.username || "A listener"} left the room`);
-
-        if (peerConnection) {
-          peerConnection.close();
-          peerConnectionsRef.current.delete(event.payload.listenerId);
-        }
-      }
-
-      if (event.type === "chat-message") {
-        const sender = connectedUsers.find((user) => user.id === event.senderId);
-        pushChatMessage({
-          id: `${event.id}-${event.senderId}`,
-          senderId: event.senderId,
-          targetId: event.targetId || null,
-          senderName: event.payload.username || "Participant",
-          audience: event.targetId ? "Private to host" : "Everyone",
-          canReplyPrivately: Boolean(
-            event.targetId === hostIdRef.current && event.senderId !== hostIdRef.current
-          ),
-          replyTarget: sender
-            ? {
-                id: sender.id,
-                username: sender.username
-              }
-            : {
-                id: event.senderId,
-                username: event.payload.username || "Listener"
-              },
-          message: event.payload.message
-        });
-      }
-    }
-
-    async function pollEvents() {
-      try {
-        const data = await fetchSessionEvents(
-          session.roomId,
-          hostIdRef.current,
-          latestEventIdRef.current
-        );
-
-        for (const event of data.events || []) {
-          latestEventIdRef.current = Math.max(latestEventIdRef.current, event.id);
-          await processEvent(event);
-        }
-
-        setHostSignalDebug(usesLiveKit ? "LiveKit room monitoring active" : "Polling signaling active");
-      } catch (pollError) {
-        if (!isCancelled) {
-          setHostSignalDebug(`Polling error: ${pollError.message}`);
-        }
-      } finally {
-        if (!isCancelled) {
-          eventPollRef.current = setTimeout(pollEvents, 1000);
-        }
-      }
-    }
-
-    async function pollSessionState() {
-      try {
-        const latestSession = await fetchSession(session.roomId);
-
-        if (!isCancelled) {
-          setConnectedUsers(latestSession.users || []);
-        }
-      } catch (pollError) {
-        if (!isCancelled) {
-          setHostSignalDebug(`Session error: ${pollError.message}`);
-        }
-      } finally {
-        if (!isCancelled) {
-          sessionPollRef.current = setTimeout(pollSessionState, 2000);
-        }
-      }
-    }
-
-    pollEvents();
-    pollSessionState();
-
-    return () => {
-      isCancelled = true;
-
-      if (eventPollRef.current) {
-        clearTimeout(eventPollRef.current);
-      }
-
-      if (sessionPollRef.current) {
-        clearTimeout(sessionPollRef.current);
-      }
-    };
-  }, [session]);
-
-  function teardownLocalSession() {
-    peerConnectionsRef.current.forEach((peer) => peer.close());
-    peerConnectionsRef.current.clear();
-
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((track) => track.stop());
-      streamRef.current = null;
-    }
-
-    if (liveKitSessionRef.current) {
-      liveKitSessionRef.current.disconnect().catch(() => {});
-      liveKitSessionRef.current = null;
-    }
-
-    if (captureStreamRef.current) {
-      captureStreamRef.current.getTracks().forEach((track) => track.stop());
-      captureStreamRef.current = null;
-    }
-
-    if (audioMeterFrameRef.current) {
-      cancelAnimationFrame(audioMeterFrameRef.current);
-      audioMeterFrameRef.current = null;
-    }
-
-    if (diagnosticAudioContextRef.current) {
-      diagnosticAudioContextRef.current.close().catch(() => {});
-      diagnosticAudioContextRef.current = null;
-      audioAnalyserRef.current = null;
-    }
-
-    if (sourceAudioContextRef.current) {
-      sourceAudioContextRef.current.close().catch(() => {});
-      sourceAudioContextRef.current = null;
-    }
-
-    if (nativeCaptureRef.current) {
-      nativeCaptureRef.current.stop().catch(() => {});
-      nativeCaptureRef.current = null;
-    }
-
-    if (fileAudioElementRef.current) {
-      fileAudioElementRef.current.pause();
-      fileAudioElementRef.current.src = "";
-      fileAudioElementRef.current = null;
-    }
-
-    if (fileAudioUrlRef.current) {
-      URL.revokeObjectURL(fileAudioUrlRef.current);
-      fileAudioUrlRef.current = null;
-    }
-
-    if (eventPollRef.current) {
-      clearTimeout(eventPollRef.current);
-      eventPollRef.current = null;
-    }
-
-    if (sessionPollRef.current) {
-      clearTimeout(sessionPollRef.current);
-      sessionPollRef.current = null;
-    }
-
-    clearHostSession();
-    roomIdRef.current = "";
-    latestEventIdRef.current = 0;
-    setSession(null);
-    setConnectedUsers([]);
-    setAudioDebug("No active capture");
-    setHostSignalDebug("Signaling idle");
-    setRecentActivity([]);
-    setChatMessages([]);
-    setReplyTarget(null);
-    setChatAudience("everyone");
+        const avg = sum / dataArray.length;
+        setAudioLevel(Math.min(100, Math.round((avg / 128) * 100)));
+        animFrameRef.current = requestAnimationFrame(updateMeter);
+      };
+      updateMeter();
+    } catch (_err) {}
   }
 
-  function pushActivity(message) {
-    setRecentActivity((current) => [message, ...current].slice(0, 5));
-  }
-
-  function pushChatMessage(message) {
-    setChatMessages((current) => {
-      if (current.some((item) => item.id === message.id)) {
-        return current;
-      }
-
-      if (activeTab !== "chat") {
-        setUnreadChatCount((count) => count + 1);
-      }
-
-      return [message, ...current].slice(0, 20);
-    });
-  }
-
-  function stopAudioDiagnostics() {
-    if (audioMeterFrameRef.current) {
-      cancelAnimationFrame(audioMeterFrameRef.current);
-      audioMeterFrameRef.current = null;
-    }
-
-    if (diagnosticAudioContextRef.current) {
-      diagnosticAudioContextRef.current.close().catch(() => {});
-      diagnosticAudioContextRef.current = null;
-    }
-
-    audioAnalyserRef.current = null;
-  }
-
-  async function stopCurrentSourceCapture() {
-    if (captureStreamRef.current) {
-      captureStreamRef.current.getTracks().forEach((track) => track.stop());
-      captureStreamRef.current = null;
-    }
-
-    if (nativeCaptureRef.current) {
-      await nativeCaptureRef.current.stop().catch(() => {});
-      nativeCaptureRef.current = null;
-    }
-
-    if (fileAudioElementRef.current) {
-      fileAudioElementRef.current.pause();
-      fileAudioElementRef.current.src = "";
-      fileAudioElementRef.current = null;
-    }
-
-    if (fileAudioUrlRef.current) {
-      URL.revokeObjectURL(fileAudioUrlRef.current);
-      fileAudioUrlRef.current = null;
-    }
-
-    if (sourceAudioContextRef.current) {
-      await sourceAudioContextRef.current.close().catch(() => {});
-      sourceAudioContextRef.current = null;
-    }
-  }
-
-  async function createFileStream(file) {
-    const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-
-    if (!AudioContextClass) {
-      throw new Error("This browser cannot stream a local audio file as a live source.");
-    }
-
-    if (fileAudioUrlRef.current) {
-      URL.revokeObjectURL(fileAudioUrlRef.current);
-      fileAudioUrlRef.current = null;
+  // Handle local audio file streaming
+  async function setupAudioFileStream(file) {
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) {
+      throw new Error("Local audio file streaming is not supported on this browser.");
     }
 
     const objectUrl = URL.createObjectURL(file);
-    fileAudioUrlRef.current = objectUrl;
+    fileObjectUrlRef.current = objectUrl;
 
     const audio = new Audio();
     audio.src = objectUrl;
     audio.preload = "auto";
-    audio.controls = false;
     audio.playsInline = true;
-    audio.loop = false;
+    fileAudioRef.current = audio;
 
     await new Promise((resolve, reject) => {
-      const handleReady = () => {
-        audio.removeEventListener("loadedmetadata", handleReady);
-        audio.removeEventListener("error", handleError);
+      audio.onloadedmetadata = () => {
+        setFileDuration(audio.duration || 0);
         resolve();
       };
-
-      const handleError = () => {
-        audio.removeEventListener("loadedmetadata", handleReady);
-        audio.removeEventListener("error", handleError);
-        reject(new Error("The selected file could not be opened for streaming."));
-      };
-
-      audio.addEventListener("loadedmetadata", handleReady);
-      audio.addEventListener("error", handleError);
+      audio.onerror = () => reject(new Error("Could not load the chosen audio file."));
     });
 
-    const audioContext = new AudioContextClass();
-    await audioContext.resume();
-    const source = audioContext.createMediaElementSource(audio);
-    const destination = audioContext.createMediaStreamDestination();
-    source.connect(destination);
-    source.connect(audioContext.destination);
+    const ctx = new AudioCtx();
+    audioContextRef.current = ctx;
+    const sourceNode = ctx.createMediaElementSource(audio);
+    const destNode = ctx.createMediaStreamDestination();
+
+    // Route to WebRTC stream AND to host local speakers
+    sourceNode.connect(destNode);
+    sourceNode.connect(ctx.destination);
+
+    audio.ontimeupdate = () => {
+      if (audio.duration) {
+        setFileProgress((audio.currentTime / audio.duration) * 100);
+      }
+    };
+    audio.onended = () => {
+      setIsFilePlaying(false);
+    };
 
     await audio.play();
+    setIsFilePlaying(true);
 
-    return {
-      captureStream: destination.stream,
-      playbackContext: audioContext,
-      audioElement: audio,
-      objectUrl
-    };
-  }
-
-  function startAudioDiagnostics(mediaStream) {
-    try {
-      const AudioContextClass = window.AudioContext || window.webkitAudioContext;
-
-      if (!AudioContextClass) {
-        setAudioDebug("Audio capture active, but browser meter is unavailable");
-        return;
-      }
-
-      stopAudioDiagnostics();
-
-      const audioContext = new AudioContextClass();
-      const source = audioContext.createMediaStreamSource(mediaStream);
-      const analyser = audioContext.createAnalyser();
-      analyser.fftSize = 256;
-      source.connect(analyser);
-
-      const samples = new Uint8Array(analyser.frequencyBinCount);
-      diagnosticAudioContextRef.current = audioContext;
-      audioAnalyserRef.current = analyser;
-
-      const tick = () => {
-        if (!audioAnalyserRef.current) {
-          return;
-        }
-
-        audioAnalyserRef.current.getByteFrequencyData(samples);
-        const average =
-          samples.reduce((total, value) => total + value, 0) / samples.length;
-
-        if (average > 4) {
-          setAudioDebug(`Audio detected (${Math.round(average)} level)`);
-        } else {
-          setAudioDebug("Capture connected, but no audible signal detected yet");
-        }
-
-        audioMeterFrameRef.current = requestAnimationFrame(tick);
-      };
-
-      tick();
-    } catch (_diagnosticError) {
-      setAudioDebug("Audio capture active, diagnostics unavailable");
-    }
-  }
-
-  async function createSourceCapture(nextAudioSourceMode) {
-    if (nextAudioSourceMode === "device-audio" && nativeCapabilities.systemAudioCapture) {
-      const nativeCapture = await startNativeSystemAudioBridge();
-      return {
-        mediaStream: nativeCapture.stream,
-        captureStream: nativeCapture.stream,
-        nativeCapture
-      };
-    }
-
-    if (nextAudioSourceMode === "audio-file") {
-      if (!selectedAudioFile) {
-        throw new Error("Choose an audio file before starting or switching the session.");
-      }
-
-      const fileSource = await createFileStream(selectedAudioFile);
-      fileSource.audioElement.addEventListener("ended", () => {
-        setStatus("Source finished");
-        setAudioDebug("The hosted audio file has finished playing");
-      });
-
-      return {
-        mediaStream: fileSource.captureStream,
-        captureStream: fileSource.captureStream,
-        sourceAudioContext: fileSource.playbackContext,
-        fileAudioElement: fileSource.audioElement,
-        fileAudioUrl: fileSource.objectUrl
-      };
-    }
-
-    const mediaStream = await captureHostAudio(nextAudioSourceMode);
-    return {
-      mediaStream,
-      captureStream: mediaStream
-    };
-  }
-
-  function applyCaptureResources(resources) {
-    captureStreamRef.current = resources.captureStream || null;
-    nativeCaptureRef.current = resources.nativeCapture || null;
-    sourceAudioContextRef.current = resources.sourceAudioContext || null;
-    fileAudioElementRef.current = resources.fileAudioElement || null;
-    fileAudioUrlRef.current = resources.fileAudioUrl || null;
-  }
-
-  async function replaceActiveSessionTrack(nextMediaStream, nextAudioSourceMode) {
-    const nextTrack = nextMediaStream.getAudioTracks()[0];
-
-    if (!nextTrack) {
-      throw new Error(
-        "No audio track was shared. Make sure you choose a tab or window with audio enabled."
-      );
-    }
-
-    if (isLiveKitSession(session)) {
-      await liveKitSessionRef.current?.replaceAudioTrack(nextMediaStream);
-    } else {
-      const replacements = [];
-      peerConnectionsRef.current.forEach((peerConnection) => {
-        const audioSender = peerConnection
-          .getSenders()
-          .find((sender) => sender.track?.kind === "audio");
-
-        if (audioSender) {
-          replacements.push(audioSender.replaceTrack(nextTrack));
-        }
-      });
-
-      await Promise.allSettled(replacements);
-    }
-
-    const previousTracks = streamRef.current?.getTracks?.() || [];
-    streamRef.current = new MediaStream([nextTrack]);
-    previousTracks.forEach((track) => {
-      if (track !== nextTrack) {
-        track.stop();
-      }
-    });
-
-    startAudioDiagnostics(streamRef.current);
-    const updatedSession = await updateSessionSource(session.roomId, {
-      audioSourceMode: nextAudioSourceMode
-    });
-    setSession(updatedSession);
+    return destNode.stream;
   }
 
   async function handleStartSession() {
     setIsStarting(true);
     setError("");
-    setStatus("Requesting audio permission");
-    let createdSession = null;
 
     try {
-      const realtimeConfig =
-        realtimeConfigRef.current || (await loadRealtimeConfig().catch(() => null));
-      const canUseLiveKit = Boolean(
-        realtimeConfig?.transport?.liveKit?.enabled && realtimeConfig?.transport?.liveKit?.url
-      );
+      let mediaStream;
 
-      if (
-        audioSourceMode === "device-audio" &&
-        !navigator.mediaDevices?.getDisplayMedia
-      ) {
-        throw new Error(
-          "This browser does not support device audio capture. Use latest Chrome or Edge."
-        );
-      }
-
-      if (isMobileHost && audioSourceMode === "device-audio") {
-        if (!nativeCapabilities.systemAudioCapture) {
+      if (audioSourceMode === "audio-file") {
+        if (!selectedFile) {
+          throw new Error("Please select an audio file first.");
+        }
+        mediaStream = await setupAudioFileStream(selectedFile);
+      } else if (audioSourceMode === "device-audio" && isNativeAndroidApp()) {
+        const nativeBridge = await startNativeSystemAudioBridge();
+        nativeBridgeRef.current = nativeBridge;
+        mediaStream = nativeBridge.stream;
+      } else {
+        if (
+          audioSourceMode === "device-audio" &&
+          /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent)
+        ) {
           throw new Error(
-            "Phone browsers do not reliably support device or tab audio sharing here. Install the Android app for native device audio, or use Microphone or Audio File mode."
+            "Phone browsers (Chrome/Safari) cannot capture audio from other apps (YouTube, Spotify) due to Android/iOS OS security. To share all audio from apps on phone, launch the TOGETHER Android App!"
           );
         }
+        mediaStream = await captureHostAudio(audioSourceMode);
       }
 
-      if (audioSourceMode === "audio-file" && !selectedAudioFile) {
-        throw new Error("Choose an audio file before starting the session.");
-      }
+      streamRef.current = mediaStream;
+      setupVisualizer(mediaStream);
 
-      createdSession = await createSession({
+      // Create session on backend
+      const newSession = await createSession({
         hostId: hostIdRef.current,
         hostName: sanitizeDisplayName(hostName, "Host"),
-        audioSourceMode,
-        preferredTransport: canUseLiveKit ? "livekit" : "webrtc-direct"
+        audioSourceMode
       });
 
-      const sourceCapture = await createSourceCapture(audioSourceMode);
-      const mediaStream = sourceCapture.mediaStream;
+      setSession(newSession);
 
-      const audioTracks = mediaStream.getAudioTracks();
-
-      if (audioTracks.length === 0) {
-        throw new Error(
-          "No audio track was shared. Make sure you choose a tab or window with audio enabled."
-        );
+      if (isNativeAndroidApp()) {
+        enableNativeBackgroundPlayback({
+          title: "TOGETHER Studio (Broadcasting)",
+          text: `Streaming Room ${newSession.roomId} (Active in background)`,
+          playing: true
+        }).catch(() => {});
       }
 
-      streamRef.current = new MediaStream(audioTracks);
-      applyCaptureResources(sourceCapture);
-      startAudioDiagnostics(streamRef.current);
-      roomIdRef.current = createdSession.roomId;
+      // Connect to Socket.IO signaling
+      const socket = createSocket();
+      socketRef.current = socket;
 
-      if (isLiveKitSession(createdSession)) {
-        liveKitSessionRef.current = await connectHostToLiveKitRoom({
-          roomId: createdSession.roomId,
-          participantId: hostIdRef.current,
-          participantName: sanitizeDisplayName(hostName, "Host"),
-          mediaStream: streamRef.current,
-          onStatusChange: (message) => {
-            setHostSignalDebug(message);
-          }
+      socket.on("connect", () => {
+        socket.emit("host-created-room", {
+          roomId: newSession.roomId,
+          hostId: hostIdRef.current
         });
-      }
-
-      setSession(createdSession);
-      saveHostSession({
-        roomId: createdSession.roomId,
-        hostId: hostIdRef.current
       });
-      setStatus(isLiveKitSession(createdSession) ? "Live room ready" : "Waiting for listeners");
-      setHostSignalDebug(
-        isLiveKitSession(createdSession) ? "LiveKit host transport active" : "Host polling ready"
-      );
 
-      audioTracks[0].addEventListener("ended", () => {
-        setStatus("Audio share stopped");
-        setAudioDebug("Audio track ended");
+      socket.on("user-count-updated", (data) => {
+        if (data.roomId === newSession.roomId) {
+          setConnectedUsers(data.users || []);
+        }
       });
-    } catch (startError) {
-      if (createdSession?.roomId) {
+
+      // When a listener joins, initiate WebRTC connection
+      socket.on("listener-joined-room", async (data) => {
+        const listenerId = data.listenerId;
+        if (!listenerId || !streamRef.current) return;
+
         try {
-          await endSession(createdSession.roomId);
-        } catch (_cleanupError) {
-          // Ignore cleanup failures after a partially created session.
-        }
-      }
+          const pc = createPeerConnection({
+            onIceCandidate: (candidate) => {
+              socket.emit("signal:ice-candidate", {
+                roomId: newSession.roomId,
+                targetId: listenerId,
+                candidate,
+                senderId: hostIdRef.current
+              });
+            }
+          });
 
-      setError(startError.message || "Unable to start sharing.");
-      setStatus("Share failed");
+          // Add audio tracks to peer connection
+          streamRef.current.getAudioTracks().forEach((track) => {
+            pc.addTrack(track, streamRef.current);
+          });
+
+          peerConnectionsRef.current.set(listenerId, pc);
+
+          const offer = await pc.createOffer({
+            offerToReceiveAudio: false,
+            offerToReceiveVideo: false
+          });
+          await pc.setLocalDescription(offer);
+
+          socket.emit("signal:offer", {
+            roomId: newSession.roomId,
+            targetListenerId: listenerId,
+            offer,
+            senderId: hostIdRef.current
+          });
+        } catch (_err) {
+          // Failed to initiate offer for listener
+        }
+      });
+
+      // Handle answer from listener
+      socket.on("signal:answer", async (data) => {
+        const pc = peerConnectionsRef.current.get(data.senderId);
+        if (pc && data.answer) {
+          try {
+            await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+          } catch (_err) {}
+        }
+      });
+
+      // Handle ICE candidates from listener
+      socket.on("signal:ice-candidate", async (data) => {
+        const pc = peerConnectionsRef.current.get(data.senderId);
+        if (pc && data.candidate) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+          } catch (_err) {}
+        }
+      });
+
+      // Handle listener disconnect
+      socket.on("listener-disconnected", (data) => {
+        const pc = peerConnectionsRef.current.get(data.listenerId);
+        if (pc) {
+          pc.close();
+          peerConnectionsRef.current.delete(data.listenerId);
+        }
+      });
+
+      // Handle chat messages
+      socket.on("chat-message", (msg) => {
+        setChatMessages((prev) => [...prev, msg]);
+      });
+    } catch (err) {
+      setError(err.message || "Failed to start audio session.");
+      teardownSession();
     } finally {
       setIsStarting(false);
     }
   }
 
-  async function handleEndSession() {
-    if (!session) {
-      return;
+  function teardownSession() {
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+    if (fileAudioRef.current) {
+      fileAudioRef.current.pause();
+      fileAudioRef.current = null;
+    }
+    if (fileObjectUrlRef.current) {
+      URL.revokeObjectURL(fileObjectUrlRef.current);
+      fileObjectUrlRef.current = null;
+    }
+    if (streamRef.current) {
+      streamRef.current.getTracks().forEach((t) => t.stop());
+      streamRef.current = null;
+    }
+    peerConnectionsRef.current.forEach((pc) => pc.close());
+    peerConnectionsRef.current.clear();
+
+    if (nativeBridgeRef.current) {
+      nativeBridgeRef.current.stop().catch(() => {});
+      nativeBridgeRef.current = null;
     }
 
-    try {
-      await endSession(session.roomId);
-    } catch (endError) {
-      setError(endError.message || "Could not end the session cleanly.");
-    } finally {
-      teardownLocalSession();
-      setStatus("Session ended");
-    }
-  }
-
-  async function handleSwitchSource() {
-    if (!session) {
-      return;
+    if (isNativeAndroidApp()) {
+      disableNativeBackgroundPlayback().catch(() => {});
     }
 
-    setIsStarting(true);
-    setError("");
-    setStatus("Switching source");
-
-    try {
-      if (
-        audioSourceMode === "device-audio" &&
-        !navigator.mediaDevices?.getDisplayMedia &&
-        !nativeCapabilities.systemAudioCapture
-      ) {
-        throw new Error(
-          "This browser does not support device audio capture. Use latest Chrome or Edge."
-        );
+    if (socketRef.current) {
+      if (session?.roomId) {
+        socketRef.current.emit("host-ended-session", { roomId: session.roomId });
       }
+      socketRef.current.disconnect();
+      socketRef.current = null;
+    }
 
-      if (isMobileHost && audioSourceMode === "device-audio" && !nativeCapabilities.systemAudioCapture) {
-        throw new Error(
-          "Phone browsers do not reliably support device or tab audio sharing here. Use Microphone or Audio File mode."
-        );
-      }
+    if (session?.roomId) {
+      endSession(session.roomId).catch(() => {});
+    }
 
-      const sourceCapture = await createSourceCapture(audioSourceMode);
-      await replaceActiveSessionTrack(sourceCapture.mediaStream, audioSourceMode);
-      await stopCurrentSourceCapture();
-      applyCaptureResources(sourceCapture);
-      setStatus("Source switched");
-      setAudioDebug(`Now sharing ${audioSourceMode === "audio-file" ? "an audio file" : audioSourceMode === "microphone" ? "microphone audio" : "device audio"}`);
-      pushActivity(`Host switched the source to ${audioSourceMode === "audio-file" ? "Audio File" : audioSourceMode === "microphone" ? "Microphone" : "Device Audio"}`);
-    } catch (switchError) {
-      setError(switchError.message || "Could not switch the live source.");
-      setStatus("Live room ready");
-    } finally {
-      setIsStarting(false);
+    setSession(null);
+    setConnectedUsers([]);
+    setChatMessages([]);
+  }
+
+  function handleEndSession() {
+    teardownSession();
+  }
+
+  function toggleMute() {
+    if (!streamRef.current) return;
+    const nextState = !isMuted;
+    streamRef.current.getAudioTracks().forEach((track) => {
+      track.enabled = !nextState;
+    });
+    setIsMuted(nextState);
+  }
+
+  function copyJoinLink() {
+    if (!joinUrl) return;
+    navigator.clipboard.writeText(joinUrl).then(() => {
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    });
+  }
+
+  function handleSendChat(e) {
+    e.preventDefault();
+    const text = chatInput.trim();
+    if (!text || !socketRef.current || !session?.roomId) return;
+
+    socketRef.current.emit("chat-message", {
+      roomId: session.roomId,
+      senderId: hostIdRef.current,
+      senderName: `${hostName} (Host)`,
+      message: text
+    });
+    setChatInput("");
+  }
+
+  function toggleFilePlayback() {
+    if (!fileAudioRef.current) return;
+    if (fileAudioRef.current.paused) {
+      fileAudioRef.current.play();
+      setIsFilePlaying(true);
+    } else {
+      fileAudioRef.current.pause();
+      setIsFilePlaying(false);
     }
   }
 
-  async function handleCopyJoinLink() {
-    if (!joinUrl) {
-      return;
-    }
-
-    try {
-      await navigator.clipboard.writeText(joinUrl);
-      setCopiedState("Link copied");
-    } catch (_error) {
-      setCopiedState("Copy failed");
-    }
+  function handleSeekFile(e) {
+    if (!fileAudioRef.current || !fileDuration) return;
+    const pct = parseFloat(e.target.value);
+    const targetTime = (pct / 100) * fileDuration;
+    fileAudioRef.current.currentTime = targetTime;
+    setFileProgress(pct);
   }
-
-  async function handleShareJoinLink() {
-    if (!joinUrl || !navigator.share) {
-      return;
-    }
-
-    try {
-      await navigator.share({
-        title: "Join my TOGETHER session",
-        text: `Listen together in room ${session?.roomId}`,
-        url: joinUrl
-      });
-    } catch (_error) {
-      // Ignore share cancellations.
-    }
-  }
-
-  async function handleSendChat() {
-    if (!session) {
-      return;
-    }
-
-    const message = sanitizeChatMessage(chatInput);
-
-    if (!message) {
-      return;
-    }
-
-    try {
-      const targetId = chatAudience === "everyone" ? null : chatAudience;
-
-      await sendSessionEvent(session.roomId, {
-        type: "chat-message",
-        senderId: hostIdRef.current,
-        targetId,
-        payload: {
-          username: sanitizeDisplayName(session.hostName || hostName, "Host"),
-          message
-        }
-      });
-
-      setChatInput("");
-      setReplyTarget(null);
-      setChatAudience("everyone");
-    } catch (_error) {
-      setError("Message could not be sent.");
-    }
-  }
-
-  const sessionAccessPanel = (
-    <>
-      <div className="panel-heading">
-        <h2>Session access</h2>
-        <span className="mini-caption">
-          {isCompactViewport ? "Share from this tab" : "Always visible while you host"}
-        </span>
-      </div>
-      {session ? (
-        <div className="qr-stack qr-stack-center">
-          <div className="qr-card">
-            <QRCode value={joinUrl} size={180} />
-          </div>
-          <p className="info-line">
-            <strong>Room ID:</strong> {session.roomId}
-          </p>
-          <p className="join-url">{joinUrl}</p>
-          <div className="button-row compact-row">
-            <button type="button" className="button-secondary" onClick={handleCopyJoinLink}>
-              Copy Link
-            </button>
-            {navigator.share ? (
-              <button type="button" className="button-secondary" onClick={handleShareJoinLink}>
-                Share
-              </button>
-            ) : null}
-          </div>
-          {copiedState ? <p className="subtle-text">{copiedState}</p> : null}
-        </div>
-      ) : (
-        <p className="empty-state">
-          Start a session to generate the room, QR code, and join link.
-        </p>
-      )}
-    </>
-  );
-
-  const studioPanel = (
-    <div className="app-panel content-stage">
-      <div className="panel-heading">
-        <h2>Studio controls</h2>
-        <span className="mini-caption">Pick the clearest source for this session</span>
-      </div>
-      <div className="studio-command-grid">
-        <div className="studio-form-stack">
-          <div className="source-toggle">
-            <button
-              type="button"
-              className={audioSourceMode === "device-audio" ? "chip active" : "chip"}
-              onClick={() => setAudioSourceMode("device-audio")}
-              disabled={!canUseDeviceAudio}
-            >
-              Device Audio
-            </button>
-            <button
-              type="button"
-              className={audioSourceMode === "microphone" ? "chip active" : "chip"}
-              onClick={() => setAudioSourceMode("microphone")}
-            >
-              Microphone
-            </button>
-            <button
-              type="button"
-              className={audioSourceMode === "audio-file" ? "chip active" : "chip"}
-              onClick={() => setAudioSourceMode("audio-file")}
-            >
-              Audio File
-            </button>
-          </div>
-
-          <input
-            className="text-input"
-            placeholder="Host name"
-            value={hostName}
-            maxLength={32}
-            onChange={(event) => setHostName(sanitizeDisplayName(event.target.value, ""))}
-            disabled={Boolean(session)}
-          />
-
-          {audioSourceMode === "audio-file" ? (
-            <div className="file-host-panel">
-              <label className="file-picker" htmlFor="audio-file-input">
-                Choose audio file
-              </label>
-              <input
-                id="audio-file-input"
-                className="file-input"
-                type="file"
-                accept="audio/*"
-                onChange={(event) => {
-                  setSelectedAudioFile(event.target.files?.[0] || null);
-                }}
-              />
-              <p className="subtle-text">
-                Pick a song, lecture clip, or podcast file from your device and TOGETHER will stream it live to listeners.
-              </p>
-              <p className="subtle-text">
-                {selectedAudioFile
-                  ? `Selected file: ${selectedAudioFile.name}`
-                  : "No audio file selected yet."}
-              </p>
-            </div>
-          ) : null}
-
-          <div className="studio-note-card">
-            <strong>{session ? "Switch inside the same room" : "Pick the cleanest source fast"}</strong>
-            <p>
-              {session
-                ? "This room stays live while you switch sources, so listeners can stay inside the same session."
-                : "Choose a source, set your host name, and go live without hunting through extra controls."}
-            </p>
-          </div>
-
-          {isMobileHost ? (
-            <p className="subtle-text">
-              Hosting from a phone works best in <strong>Microphone</strong> or <strong>Audio File</strong> mode.
-              {nativeCapabilities.systemAudioCapture
-                ? " Native mobile capture is available on supported Android setups."
-                : " Mobile browsers still do not reliably support full device audio output sharing."}
-            </p>
-          ) : null}
-        </div>
-
-        <div className="studio-guide-panel">
-          <div className="studio-guide-header">
-            <strong>Quick source guide</strong>
-            <span>Choose in seconds</span>
-          </div>
-          <div className="mode-explainer-grid">
-            <div className="mode-explainer">
-              <strong>Device Audio</strong>
-              <p>Browser tabs, laptop playback, videos, and anything your desktop can share directly.</p>
-            </div>
-            <div className="mode-explainer">
-              <strong>Microphone</strong>
-              <p>Voice rooms, teaching, announcements, and live conversation from any device.</p>
-            </div>
-            <div className="mode-explainer">
-              <strong>Audio File</strong>
-              <p>Stable hosting for phones, portable setups, and moments where you want a predictable source.</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  const peoplePanel = (
-    <div className="app-panel content-stage">
-      <div className="panel-heading">
-        <h2>Participants</h2>
-        <button
-          type="button"
-          className="button-secondary diagnostics-toggle"
-          onClick={() => setShowHostDetails((current) => !current)}
-        >
-          {showHostDetails ? "Hide Details" : "View Details"}
-        </button>
-      </div>
-      {showHostDetails ? (
-        <div className="diagnostic-card">
-          <strong>Host details</strong>
-          <p className="diagnostic-line">{audioDebug}</p>
-          <p className="diagnostic-line">{hostSignalDebug}</p>
-        </div>
-      ) : null}
-      <div className="listener-list">
-        {participantList.length === 0 ? (
-          <p className="empty-state">No participants yet.</p>
-        ) : (
-          participantList.map((user) => (
-            <div key={user.id} className="listener-pill participant-pill">
-              <span>{user.username}</span>
-              <strong>{user.role}</strong>
-            </div>
-          ))
-        )}
-      </div>
-      <div className="activity-feed">
-        <p className="section-kicker">Recent activity</p>
-        {recentActivity.length === 0 ? (
-          <p className="empty-state">Join and leave updates will appear here.</p>
-        ) : (
-          recentActivity.map((item, index) => (
-            <p key={`${item}-${index}`} className="activity-line">
-              {item}
-            </p>
-          ))
-        )}
-      </div>
-    </div>
-  );
-
-  const chatPanel = (
-    <div className="app-panel content-stage">
-      <div className="panel-heading">
-        <h2>Room chat</h2>
-        <span className="mini-caption">Newest messages stay at the top</span>
-      </div>
-      <div className="chat-feed chat-feed-large latest-first">
-        {chatMessages.length === 0 ? (
-          <p className="empty-state">Room messages will appear here.</p>
-        ) : (
-          chatMessages.map((message) => (
-            <div key={message.id} className="chat-bubble">
-              <div className="chat-meta">
-                <strong>{message.senderName}</strong>
-                <span>{message.audience}</span>
-              </div>
-              <p>{message.message}</p>
-              {message.canReplyPrivately ? (
-                <button
-                  type="button"
-                  className="button-secondary diagnostics-toggle"
-                  onClick={() => {
-                    setReplyTarget(message.replyTarget);
-                    setChatAudience(message.replyTarget.id);
-                    setActiveTab("chat");
-                  }}
-                >
-                  Reply privately
-                </button>
-              ) : null}
-            </div>
-          ))
-        )}
-      </div>
-      <div className="chat-compose">
-        <select
-          className="text-input chat-select"
-          value={chatAudience}
-          onChange={(event) => {
-            const nextAudience = event.target.value;
-            setChatAudience(nextAudience);
-            setReplyTarget(
-              nextAudience === "everyone"
-                ? null
-                : connectedUsers.find((user) => user.id === nextAudience) || null
-            );
-          }}
-        >
-          <option value="everyone">Message everyone</option>
-          {connectedUsers.map((user) => (
-            <option key={user.id} value={user.id}>
-              Reply to {user.username} only
-            </option>
-          ))}
-        </select>
-        <input
-          className="text-input"
-          placeholder={
-            replyTarget
-              ? `Reply privately to ${replyTarget.username}`
-              : "Send a message to the room"
-          }
-          value={chatInput}
-          maxLength={220}
-          onChange={(event) => setChatInput(event.target.value)}
-        />
-        <button type="button" className="button-primary" onClick={handleSendChat}>
-          Send
-        </button>
-      </div>
-    </div>
-  );
-
-  const compactHostTabs = [
-    { id: "studio", label: "Studio" },
-    { id: "access", label: "Access" },
-    { id: "people", label: "People" },
-    { id: "chat", label: unreadChatCount ? `Chat (${unreadChatCount})` : "Chat" }
-  ];
 
   return (
-    <AppShell
-      lockNavigation={Boolean(session)}
-      lockLabel="Finish or end the live session first"
-    >
-      {isCompactViewport ? (
-        <section className="mobile-app-shell fade-in">
-          <div className="content-card mobile-hero-card">
-            <div className="mobile-title-row">
-              <div>
-                <p className="eyebrow">Host studio</p>
-                <h1>Broadcast your live audio</h1>
-              </div>
-              <StatusBadge tone={session ? "success" : "neutral"}>{status}</StatusBadge>
+    <AppShell>
+      <div style={{ maxWidth: "1080px", margin: "24px auto 0" }}>
+        {!session ? (
+          /* PRE-SESSION STUDIO SETUP */
+          <div className="content-card fade-in" style={{ padding: "36px", maxWidth: "560px", margin: "40px auto 0" }}>
+            <div style={{ textAlign: "center", marginBottom: "28px" }}>
+              <span style={{ fontSize: "2.5rem", display: "block", marginBottom: "8px" }}>🎙️</span>
+              <h1 style={{ fontSize: "1.8rem", margin: "0 0 6px" }}>Host Studio</h1>
+              <p className="subtle-text" style={{ margin: 0, fontSize: "0.95rem" }}>
+                Choose your audio source and launch a live room.
+              </p>
             </div>
 
-            <div className="mobile-stat-strip">
-              <div className="mobile-stat-pill">
-                <span>Room</span>
-                <strong>{session?.roomId || "Not live"}</strong>
+            {error && (
+              <div style={{
+                background: "rgba(217, 56, 58, 0.1)",
+                border: "1px solid rgba(217, 56, 58, 0.3)",
+                padding: "12px 16px",
+                borderRadius: "12px",
+                color: "#d9383a",
+                fontSize: "0.9rem",
+                marginBottom: "20px"
+              }}>
+                {error}
               </div>
-              <div className="mobile-stat-pill">
-                <span>Listeners</span>
-                <strong>{connectedUsers.length}</strong>
-              </div>
-              <div className="mobile-stat-pill">
-                <span>Source</span>
-                <strong>
-                  {audioSourceMode === "device-audio"
-                    ? "Device"
-                    : audioSourceMode === "audio-file"
-                      ? "File"
-                      : "Mic"}
-                </strong>
-              </div>
-            </div>
+            )}
 
-          <div className="mobile-primary-actions">
-              <button
-                type="button"
-                className="button-primary"
-                onClick={session ? handleSwitchSource : handleStartSession}
-                disabled={isStarting}
-              >
-                {isStarting ? (session ? "Switching..." : "Starting...") : session ? "Switch Source" : "Go Live"}
-              </button>
-              <button
-                type="button"
-                className="button-secondary"
-                onClick={handleEndSession}
-                disabled={!session}
-              >
-                End
-              </button>
-            </div>
-          </div>
-
-          {error ? <p className="error-banner">{error}</p> : null}
-
-          <div className="mobile-tab-dock" role="tablist" aria-label="Host sections">
-            {compactHostTabs.map((tab) => (
-              <button
-                key={tab.id}
-                type="button"
-                className={activeTab === tab.id ? "mobile-tab-button active" : "mobile-tab-button"}
-                onClick={() => setActiveTab(tab.id)}
-              >
-                {tab.label}
-              </button>
-            ))}
-          </div>
-
-          <section className="content-card mobile-content-card">
-            {activeTab === "studio" ? studioPanel : null}
-            {activeTab === "access" ? <div className="app-panel content-stage">{sessionAccessPanel}</div> : null}
-            {activeTab === "people" ? peoplePanel : null}
-            {activeTab === "chat" ? chatPanel : null}
-          </section>
-        </section>
-      ) : (
-      <section className="studio-shell fade-in">
-        <aside className="content-card studio-sidebar">
-          <div className="studio-brand">
-            <p className="eyebrow">Host studio</p>
-            <h2>Run the room</h2>
-            <p className="subtle-text">
-              Control the source, track the room, and share access without hunting through the page.
-            </p>
-          </div>
-
-          <div className="studio-nav" role="tablist" aria-label="Host sections">
-            <button
-              type="button"
-              className={activeTab === "studio" ? "studio-nav-button active" : "studio-nav-button"}
-              onClick={() => setActiveTab("studio")}
-            >
-              <strong>Studio</strong>
-              <span>Source, host identity, and start controls</span>
-            </button>
-            <button
-              type="button"
-              className={activeTab === "people" ? "studio-nav-button active" : "studio-nav-button"}
-              onClick={() => setActiveTab("people")}
-            >
-              <strong>People</strong>
-              <span>Presence, room members, and activity</span>
-            </button>
-            <button
-              type="button"
-              className={activeTab === "chat" ? "studio-nav-button active" : "studio-nav-button"}
-              onClick={() => setActiveTab("chat")}
-            >
-              <strong>{unreadChatCount ? `Chat (${unreadChatCount})` : "Chat"}</strong>
-              <span>Coordinate with listeners inside the room</span>
-            </button>
-          </div>
-
-          <div className="studio-sidebar-footer">
-            <StatusBadge tone={session ? "success" : "neutral"}>{status}</StatusBadge>
-            <div className="button-row sidebar-actions">
-              <button
-                type="button"
-                className="button-primary"
-                onClick={session ? handleSwitchSource : handleStartSession}
-                disabled={isStarting}
-              >
-                {isStarting ? (session ? "Switching..." : "Starting...") : session ? "Switch Source" : "Go Live"}
-              </button>
-              <button
-                type="button"
-                className="button-secondary"
-                onClick={handleEndSession}
-                disabled={!session}
-              >
-                End
-              </button>
-            </div>
-          </div>
-        </aside>
-
-        <article className="content-card studio-main">
-          <div className="section-header compact-section-header">
-            <div>
-              <p className="eyebrow">TOGETHER</p>
-              <h1>Broadcast your live audio</h1>
-            </div>
-          </div>
-
-          <div className="workspace-hero compact-hero">
-            <div className="workspace-kpis">
-              <div className="workspace-stat">
-                <span>Room</span>
-                <strong>{session?.roomId || "Not live"}</strong>
-              </div>
-              <div className="workspace-stat">
-                <span>Listeners</span>
-                <strong>{connectedUsers.length}</strong>
-              </div>
-              <div className="workspace-stat">
-                <span>Source</span>
-                <strong>
-                  {audioSourceMode === "device-audio"
-                    ? "Device Audio"
-                    : audioSourceMode === "audio-file"
-                      ? "Audio File"
-                      : "Microphone"}
-                </strong>
-              </div>
-            </div>
-          </div>
-
-          {error ? <p className="error-banner">{error}</p> : null}
-
-          {activeTab === "studio" ? (
-            <div className="app-panel content-stage">
-              <div className="panel-heading">
-                <h2>Studio controls</h2>
-                <span className="mini-caption">Pick the clearest source for this session</span>
-              </div>
-              <div className="source-toggle">
-                <button
-                  type="button"
-                  className={audioSourceMode === "device-audio" ? "chip active" : "chip"}
-                  onClick={() => setAudioSourceMode("device-audio")}
-                  disabled={!canUseDeviceAudio}
-                >
-                  Device Audio
-                </button>
-                <button
-                  type="button"
-                  className={audioSourceMode === "microphone" ? "chip active" : "chip"}
-                  onClick={() => setAudioSourceMode("microphone")}
-                >
-                  Microphone
-                </button>
-                <button
-                  type="button"
-                  className={audioSourceMode === "audio-file" ? "chip active" : "chip"}
-                  onClick={() => setAudioSourceMode("audio-file")}
-              >
-                Audio File
-              </button>
-            </div>
-
-            {audioSourceMode === "audio-file" ? (
-              <div className="file-host-panel">
-                <label className="file-picker" htmlFor="audio-file-input">
-                  Choose audio file
-                </label>
+            <div style={{ display: "flex", flexDirection: "column", gap: "20px" }}>
+              <label className="field-block">
+                <span className="field-label">Host Name</span>
                 <input
-                  id="audio-file-input"
-                  className="file-input"
-                  type="file"
-                  accept="audio/*"
-                  onChange={(event) => {
-                    setSelectedAudioFile(event.target.files?.[0] || null);
-                  }}
-                />
-                <p className="subtle-text">
-                  Pick a song, lecture clip, or podcast file from your device and TOGETHER will stream it live to listeners.
-                </p>
-                <p className="subtle-text">
-                  {selectedAudioFile
-                    ? `Selected file: ${selectedAudioFile.name}`
-                    : "No audio file selected yet."}
-                </p>
-              </div>
-            ) : null}
-
-              <input
-                className="text-input"
-                placeholder="Host name"
-                value={hostName}
-                maxLength={32}
-                onChange={(event) => setHostName(sanitizeDisplayName(event.target.value, ""))}
-                disabled={Boolean(session)}
-              />
-
-              <div className="mode-explainer-grid">
-                <div className="mode-explainer">
-                  <strong>Device Audio</strong>
-                  <p>Best for browser tabs, laptop playback, videos, and anything your desktop can share directly.</p>
-                </div>
-                <div className="mode-explainer">
-                  <strong>Microphone</strong>
-                  <p>Best for voice rooms, quick announcements, teaching, and live conversation from any device.</p>
-                </div>
-                <div className="mode-explainer">
-                  <strong>Audio File</strong>
-                  <p>Best for phones or portable hosting when you want a predictable, stable audio source.</p>
-                </div>
-              </div>
-
-              {isMobileHost ? (
-                <p className="subtle-text">
-                  Hosting from a phone works best in <strong>Microphone</strong> or <strong>Audio File</strong> mode.
-                  {nativeCapabilities.systemAudioCapture
-                    ? " Native mobile capture is available on supported Android setups."
-                    : " Mobile browsers still do not reliably support full device audio output sharing."}
-                </p>
-              ) : null}
-
-              {session ? (
-                <p className="subtle-text">
-                  This room stays live while you switch sources. Pick a new source above and tap <strong>Switch Source</strong> to change it without creating a new link.
-                </p>
-              ) : null}
-            </div>
-          ) : null}
-
-          {activeTab === "people" ? (
-            <div className="app-panel content-stage">
-              <div className="panel-heading">
-                <h2>Participants</h2>
-                <button
-                  type="button"
-                  className="button-secondary diagnostics-toggle"
-                  onClick={() => setShowHostDetails((current) => !current)}
-                >
-                  {showHostDetails ? "Hide Details" : "View Details"}
-                </button>
-              </div>
-              {showHostDetails ? (
-                <div className="diagnostic-card">
-                  <strong>Host details</strong>
-                  <p className="diagnostic-line">{audioDebug}</p>
-                  <p className="diagnostic-line">{hostSignalDebug}</p>
-                </div>
-              ) : null}
-              <div className="listener-list">
-                {participantList.length === 0 ? (
-                  <p className="empty-state">No participants yet.</p>
-                ) : (
-                  participantList.map((user) => (
-                    <div key={user.id} className="listener-pill participant-pill">
-                      <span>{user.username}</span>
-                      <strong>{user.role}</strong>
-                    </div>
-                  ))
-                )}
-              </div>
-              <div className="activity-feed">
-                <p className="section-kicker">Recent activity</p>
-                {recentActivity.length === 0 ? (
-                  <p className="empty-state">Join and leave updates will appear here.</p>
-                ) : (
-                  recentActivity.map((item, index) => (
-                    <p key={`${item}-${index}`} className="activity-line">
-                      {item}
-                    </p>
-                  ))
-                )}
-              </div>
-            </div>
-          ) : null}
-
-          {activeTab === "chat" ? (
-            <div className="app-panel content-stage">
-              <div className="panel-heading">
-                <h2>Room chat</h2>
-                <span className="mini-caption">Quick coordination while the session stays live</span>
-              </div>
-              <div className="chat-feed chat-feed-large">
-                {chatMessages.length === 0 ? (
-                  <p className="empty-state">Room messages will appear here.</p>
-                ) : (
-                  chatMessages.map((message) => (
-                    <div key={message.id} className="chat-bubble">
-                      <div className="chat-meta">
-                        <strong>{message.senderName}</strong>
-                        <span>{message.audience}</span>
-                      </div>
-                      <p>{message.message}</p>
-                      {message.canReplyPrivately ? (
-                        <button
-                          type="button"
-                          className="button-secondary diagnostics-toggle"
-                          onClick={() => {
-                            setReplyTarget(message.replyTarget);
-                            setChatAudience(message.replyTarget.id);
-                          }}
-                        >
-                          Reply privately
-                        </button>
-                      ) : null}
-                    </div>
-                  ))
-                )}
-              </div>
-              <div className="chat-compose">
-                <select
-                  className="text-input chat-select"
-                  value={chatAudience}
-                  onChange={(event) => {
-                    const nextAudience = event.target.value;
-                    setChatAudience(nextAudience);
-                    setReplyTarget(
-                      nextAudience === "everyone"
-                        ? null
-                        : connectedUsers.find((user) => user.id === nextAudience) || null
-                    );
-                  }}
-                >
-                  <option value="everyone">Message everyone</option>
-                  {connectedUsers.map((user) => (
-                    <option key={user.id} value={user.id}>
-                      Reply to {user.username} only
-                    </option>
-                  ))}
-                </select>
-                <input
+                  type="text"
+                  placeholder="Host"
+                  value={hostName}
+                  onChange={(e) => setHostName(e.target.value)}
+                  maxLength={30}
                   className="text-input"
-                  placeholder={
-                    replyTarget
-                      ? `Reply privately to ${replyTarget.username}`
-                      : "Send a message to the room"
-                  }
-                  value={chatInput}
-                  maxLength={220}
-                  onChange={(event) => setChatInput(event.target.value)}
                 />
-                <button type="button" className="button-primary" onClick={handleSendChat}>
+              </label>
+
+              <div className="field-block">
+                <span className="field-label">Audio Source</span>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: "8px", marginTop: "6px" }}>
+                  <button
+                    type="button"
+                    className={`button-secondary ${audioSourceMode === "microphone" ? "active-pill" : ""}`}
+                    onClick={() => setAudioSourceMode("microphone")}
+                    style={{
+                      padding: "10px 8px",
+                      fontSize: "0.85rem",
+                      fontWeight: audioSourceMode === "microphone" ? 700 : 500,
+                      borderColor: audioSourceMode === "microphone" ? "#ff8c42" : "inherit"
+                    }}
+                  >
+                    🎤 Microphone
+                  </button>
+                  <button
+                    type="button"
+                    className={`button-secondary ${audioSourceMode === "device-audio" ? "active-pill" : ""}`}
+                    onClick={() => setAudioSourceMode("device-audio")}
+                    style={{
+                      padding: "10px 8px",
+                      fontSize: "0.85rem",
+                      fontWeight: audioSourceMode === "device-audio" ? 700 : 500,
+                      borderColor: audioSourceMode === "device-audio" ? "#ff8c42" : "inherit"
+                    }}
+                  >
+                    {isNativeAndroidApp() ? "📱 All Apps (YouTube, Spotify)" : "💻 All Apps / Tab"}
+                  </button>
+                  <button
+                    type="button"
+                    className={`button-secondary ${audioSourceMode === "audio-file" ? "active-pill" : ""}`}
+                    onClick={() => setAudioSourceMode("audio-file")}
+                    style={{
+                      padding: "10px 8px",
+                      fontSize: "0.85rem",
+                      fontWeight: audioSourceMode === "audio-file" ? 700 : 500,
+                      borderColor: audioSourceMode === "audio-file" ? "#ff8c42" : "inherit"
+                    }}
+                  >
+                    📁 Audio File
+                  </button>
+                </div>
+                {audioSourceMode === "device-audio" && !isNativeAndroidApp() && (
+                  <p className="subtle-text" style={{ fontSize: "0.82rem", margin: "8px 0 0", lineHeight: 1.4 }}>
+                    💡 <strong>To capture audio from phone apps (Spotify, YouTube, etc.):</strong> Use the TOGETHER Android App (utilizes Android’s internal playback capture). On laptop/PC, this shares tab & app audio directly.
+                  </p>
+                )}
+              </div>
+
+              {audioSourceMode === "audio-file" && (
+                <div className="field-block">
+                  <span className="field-label">Select Audio File</span>
+                  <input
+                    type="file"
+                    accept="audio/*"
+                    onChange={(e) => setSelectedFile(e.target.files?.[0] || null)}
+                    className="text-input"
+                    style={{ padding: "8px" }}
+                  />
+                  {selectedFile && (
+                    <span className="subtle-text" style={{ fontSize: "0.82rem", marginTop: "4px", display: "block" }}>
+                      Selected: <strong>{selectedFile.name}</strong>
+                    </span>
+                  )}
+                </div>
+              )}
+
+              <button
+                type="button"
+                className="button-primary"
+                onClick={handleStartSession}
+                disabled={isStarting}
+                style={{
+                  width: "100%",
+                  justifyContent: "center",
+                  padding: "14px",
+                  fontSize: "1.05rem",
+                  marginTop: "8px"
+                }}
+              >
+                {isStarting ? "Starting Studio..." : "Start Broadcasting Live &rarr;"}
+              </button>
+            </div>
+          </div>
+        ) : (
+          /* ACTIVE LIVE STUDIO */
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(340px, 1fr))", gap: "24px" }}>
+            {/* Left Column: Streaming Controls & QR */}
+            <div className="content-card fade-in" style={{ padding: "28px" }}>
+              {/* Session Top Bar */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "20px" }}>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "6px" }}>
+                    <span className="live-pill" style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      background: "rgba(231, 76, 60, 0.15)",
+                      color: "#c0392b",
+                      padding: "4px 10px",
+                      borderRadius: "999px",
+                      fontSize: "0.82rem",
+                      fontWeight: 700
+                    }}>
+                      <span style={{
+                        width: "8px",
+                        height: "8px",
+                        borderRadius: "50%",
+                        background: "#e74c3c"
+                      }} />
+                      LIVE BROADCASTING
+                    </span>
+                  </div>
+                  <h1 style={{ fontSize: "1.45rem", margin: "2px 0 0" }}>
+                    Room <span style={{ color: "var(--accent-primary)" }}>{session.roomId}</span>
+                  </h1>
+                </div>
+
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={handleEndSession}
+                  style={{ color: "var(--accent-rose)", borderColor: "rgba(244, 63, 94, 0.3)", fontSize: "0.85rem", padding: "8px 14px" }}
+                >
+                  End Session
+                </button>
+              </div>
+
+              {/* QR Code & Direct Link */}
+              <div style={{
+                background: "rgba(0, 0, 0, 0.25)",
+                border: "1px solid var(--border-subtle)",
+                padding: "20px",
+                borderRadius: "18px",
+                textAlign: "center",
+                marginBottom: "24px"
+              }}>
+                <div style={{
+                  background: "#fff",
+                  padding: "12px",
+                  borderRadius: "14px",
+                  display: "inline-block",
+                  boxShadow: "0 4px 14px rgba(0,0,0,0.2)",
+                  marginBottom: "12px"
+                }}>
+                  <QRCode value={joinUrl} size={160} />
+                </div>
+                <p className="subtle-text" style={{ fontSize: "0.85rem", margin: "0 0 12px" }}>
+                  Scan with any phone camera to listen instantly
+                </p>
+                <div style={{ display: "flex", gap: "8px", justifyContent: "center" }}>
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={copyJoinLink}
+                    style={{ fontSize: "0.85rem", padding: "6px 14px" }}
+                  >
+                    {copied ? "✅ Link Copied!" : "📋 Copy Join Link"}
+                  </button>
+                </div>
+              </div>
+
+              {/* Audio Visualizer & Source info */}
+              <div style={{
+                background: "rgba(0, 0, 0, 0.25)",
+                border: "1px solid var(--border-subtle)",
+                padding: "18px",
+                borderRadius: "16px",
+                marginBottom: "20px"
+              }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
+                  <span className="field-label" style={{ margin: 0, textTransform: "capitalize" }}>
+                    Source: {session.audioSourceMode.replace("-", " ")}
+                  </span>
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={toggleMute}
+                    style={{ padding: "4px 10px", fontSize: "0.82rem" }}
+                  >
+                    {isMuted ? "🔇 Unmute Audio" : "🎤 Mute Audio"}
+                  </button>
+                </div>
+
+                {/* Animated waveform bars */}
+                <div style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "4px",
+                  height: "44px"
+                }}>
+                  {[0.5, 0.9, 1.3, 1.6, 1.2, 0.8, 1.4, 0.6, 1.1, 1.5].map((mult, i) => {
+                    const h = isMuted ? 6 : Math.max(6, Math.min(44, Math.round(audioLevel * mult * 0.45)));
+                    return (
+                      <div
+                        key={i}
+                        style={{
+                          width: "6px",
+                          height: `${h}px`,
+                          borderRadius: "3px",
+                          background: isMuted ? "rgba(255,255,255,0.15)" : audioLevel > 5 ? "var(--accent-primary)" : "rgba(255,255,255,0.15)",
+                          boxShadow: !isMuted && audioLevel > 5 ? "0 0 10px var(--accent-primary-glow)" : "none",
+                          transition: "height 0.08s ease"
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+              </div>
+
+              {/* Audio File Player (if audio-file mode) */}
+              {session.audioSourceMode === "audio-file" && (
+                <div style={{
+                  background: "rgba(0, 0, 0, 0.03)",
+                  padding: "16px",
+                  borderRadius: "16px",
+                  marginBottom: "20px"
+                }}>
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "8px" }}>
+                    <span style={{ fontSize: "0.85rem", fontWeight: 600 }}>File Stream Controls</span>
+                    <button
+                      type="button"
+                      className="button-primary"
+                      onClick={toggleFilePlayback}
+                      style={{ padding: "4px 12px", fontSize: "0.82rem" }}
+                    >
+                      {isFilePlaying ? "⏸ Pause" : "▶ Play"}
+                    </button>
+                  </div>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={fileProgress}
+                    onChange={handleSeekFile}
+                    style={{ width: "100%", accentColor: "#ff8c42" }}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Right Column: Participants & Room Chat */}
+            <div className="content-card fade-in" style={{ padding: "24px", display: "flex", flexDirection: "column", height: "620px" }}>
+              {/* Header with Connected Listeners */}
+              <div style={{ marginBottom: "16px", borderBottom: "1px solid rgba(0,0,0,0.06)", paddingBottom: "12px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <h3 style={{ margin: 0, fontSize: "1.1rem" }}>👥 Listeners ({connectedUsers.length})</h3>
+                  <span className="live-pill" style={{
+                    fontSize: "0.78rem",
+                    padding: "3px 8px",
+                    background: "rgba(46, 204, 113, 0.15)",
+                    color: "#27ae60",
+                    borderRadius: "999px",
+                    fontWeight: 600
+                  }}>
+                    {connectedUsers.length} Online
+                  </span>
+                </div>
+                {connectedUsers.length > 0 && (
+                  <div style={{ display: "flex", gap: "6px", flexWrap: "wrap", marginTop: "8px" }}>
+                    {connectedUsers.map((u) => (
+                      <span key={u.id} style={{
+                        fontSize: "0.78rem",
+                        padding: "2px 8px",
+                        background: "rgba(0,0,0,0.05)",
+                        borderRadius: "6px"
+                      }}>
+                        {u.username}
+                      </span>
+                    ))}
+                  </div>
+                )}
+              </div>
+
+              {/* Chat Title */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "10px" }}>
+                <h4 style={{ margin: 0, fontSize: "0.95rem" }}>💬 Room Chat</h4>
+              </div>
+
+              {/* Chat Messages */}
+              <div
+                ref={chatScrollRef}
+                style={{
+                  flex: 1,
+                  overflowY: "auto",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "10px",
+                  paddingRight: "6px",
+                  marginBottom: "16px"
+                }}
+              >
+                {chatMessages.length === 0 ? (
+                  <p className="subtle-text" style={{ textAlign: "center", margin: "auto", fontSize: "0.85rem" }}>
+                    No messages yet. Messages from listeners will appear here.
+                  </p>
+                ) : (
+                  chatMessages.map((msg) => {
+                    const isMe = msg.senderId === hostIdRef.current;
+                    return (
+                      <div
+                        key={msg.id}
+                        style={{
+                          alignSelf: isMe ? "flex-end" : "flex-start",
+                          maxWidth: "80%",
+                          background: isMe ? "#ff8c42" : "rgba(0, 0, 0, 0.06)",
+                          color: isMe ? "#fff" : "inherit",
+                          padding: "8px 14px",
+                          borderRadius: "14px",
+                          fontSize: "0.9rem"
+                        }}
+                      >
+                        <span style={{
+                          display: "block",
+                          fontSize: "0.75rem",
+                          fontWeight: 700,
+                          opacity: 0.8,
+                          marginBottom: "2px"
+                        }}>
+                          {msg.senderName}
+                        </span>
+                        <p style={{ margin: 0, wordBreak: "break-word" }}>{msg.message}</p>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Chat Input */}
+              <form onSubmit={handleSendChat} style={{ display: "flex", gap: "8px" }}>
+                <input
+                  type="text"
+                  placeholder="Send a message to room..."
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  maxLength={200}
+                  className="text-input"
+                  style={{ flex: 1, padding: "10px 14px", fontSize: "0.9rem" }}
+                />
+                <button type="submit" className="button-primary" style={{ padding: "0 18px", fontSize: "0.9rem" }}>
                   Send
                 </button>
-              </div>
+              </form>
             </div>
-          ) : null}
-        </article>
-
-        <aside className="content-card studio-sidepanel slide-up">
-          {sessionAccessPanel}
-        </aside>
-      </section>
-      )}
+          </div>
+        )}
+      </div>
     </AppShell>
   );
 }

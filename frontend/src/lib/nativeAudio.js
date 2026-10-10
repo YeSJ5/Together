@@ -102,7 +102,6 @@ export async function startNativeSystemAudioBridge() {
   const outputGain = audioContext.createGain();
   const destination = audioContext.createMediaStreamDestination();
   outputGain.connect(destination);
-  outputGain.connect(audioContext.destination);
 
   let scheduledTime = audioContext.currentTime + 0.15;
 

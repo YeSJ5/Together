@@ -1,1013 +1,612 @@
 import { useEffect, useRef, useState } from "react";
-import { useNavigate, useParams } from "react-router-dom";
+import { Link, useNavigate, useParams } from "react-router-dom";
 import AppShell from "../components/AppShell";
-import StatusBadge from "../components/StatusBadge";
-import {
-  fetchSession,
-  fetchSessionEvents,
-  joinSession,
-  leaveSession,
-  leaveSessionInBackground,
-  sendSessionEvent
-} from "../lib/api";
-import { connectListenerToLiveKitRoom, isLiveKitSession } from "../lib/livekitRoom";
+import { fetchSession } from "../lib/api";
+import { createAppId } from "../lib/ids";
+import { normalizeRoomId } from "../lib/sanitize";
+import { createSocket } from "../lib/socket";
+import { getListenerSession } from "../lib/storage";
+import { createPeerConnection } from "../lib/webrtc";
 import {
   disableNativeBackgroundPlayback,
   enableNativeBackgroundPlayback,
-  updateNativeBackgroundPlaybackState,
   isNativeAndroidApp
 } from "../lib/nativeAudio";
-import { isInstalledPwaExperience } from "../lib/pwa";
-import { sanitizeChatMessage } from "../lib/sanitize";
-import { clearListenerSession, getListenerSession } from "../lib/storage";
-import { useCompactViewport } from "../lib/useCompactViewport";
-import { useNavigationLock } from "../lib/useNavigationLock";
-import { createPeerConnection } from "../lib/webrtc";
 
 export default function LiveSessionPage() {
   const { roomId } = useParams();
   const navigate = useNavigate();
-  const isCompactViewport = useCompactViewport();
-  const audioRef = useRef(null);
-  const peerConnectionRef = useRef(null);
-  const pollingRef = useRef(null);
-  const roomPollRef = useRef(null);
-  const liveKitSessionRef = useRef(null);
-  const latestEventIdRef = useRef(0);
-  const wakeLockRef = useRef(null);
-  const playbackWatchdogRef = useRef(null);
-  const lastPlaybackAtRef = useRef(Date.now());
-  const lastTrackAtRef = useRef(0);
-  const lastRecoveryAtRef = useRef(0);
-  const connectedRef = useRef(false);
-  const awaitingGestureRef = useRef(false);
-  const hiddenRef = useRef(false);
-  const [status, setStatus] = useState("Connecting");
-  const [error, setError] = useState("");
-  const [volume, setVolume] = useState(100);
-  const [connected, setConnected] = useState(false);
-  const [diagnostics, setDiagnostics] = useState(["Opening listener session"]);
-  const [awaitingGesture, setAwaitingGesture] = useState(false);
-  const [showDiagnostics, setShowDiagnostics] = useState(false);
-  const [roomSnapshot, setRoomSnapshot] = useState(null);
+  const normalizedRoomId = normalizeRoomId(roomId);
+
+  const [listenerId] = useState(() => createAppId("listener"));
+  const [username] = useState(() => {
+    const saved = getListenerSession();
+    return saved?.username || "Listener";
+  });
+
+  const [sessionData, setSessionData] = useState(null);
+  const [isConnected, setIsConnected] = useState(false);
+  const [isPlaying, setIsPlaying] = useState(false);
+  const [needsGesture, setNeedsGesture] = useState(false);
+  const [volume, setVolume] = useState(1);
+  const [isMuted, setIsMuted] = useState(false);
+  const [sessionEnded, setSessionEnded] = useState(false);
+  const [endReason, setEndReason] = useState("");
+  const [listenerCount, setListenerCount] = useState(1);
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState("");
-  const [chatAudience, setChatAudience] = useState("everyone");
-  const [sessionNote, setSessionNote] = useState(
-    "Tap play, give it a tiny beat, and let the room tune in."
-  );
-  const [isLeaving, setIsLeaving] = useState(false);
-  const [activeTab, setActiveTab] = useState("player");
-  const [unreadChatCount, setUnreadChatCount] = useState(0);
+  const [audioLevel, setAudioLevel] = useState(0);
 
-  useNavigationLock(
-    !isLeaving && status !== "Session ended" && status !== "Unavailable",
-    "Leave the current listening session before navigating away."
-  );
+  const socketRef = useRef(null);
+  const peerConnectionRef = useRef(null);
+  const audioElementRef = useRef(null);
+  const audioContextRef = useRef(null);
+  const analyserRef = useRef(null);
+  const animFrameRef = useRef(null);
+  const chatScrollRef = useRef(null);
 
-  function pushDiagnostic(message) {
-    setDiagnostics((current) => [...current, message].slice(-10));
-  }
-
-  function updateConnected(nextConnected) {
-    connectedRef.current = nextConnected;
-    setConnected(nextConnected);
-
-    if (nextConnected) {
-      lastPlaybackAtRef.current = Date.now();
+  // Auto-scroll chat
+  useEffect(() => {
+    if (chatScrollRef.current) {
+      chatScrollRef.current.scrollTop = chatScrollRef.current.scrollHeight;
     }
-  }
-
-  function updateAwaitingGesture(nextAwaitingGesture) {
-    awaitingGestureRef.current = nextAwaitingGesture;
-    setAwaitingGesture(nextAwaitingGesture);
-  }
-
-  function pushChatMessage(message) {
-    setChatMessages((current) => {
-      if (current.some((item) => item.id === message.id)) {
-        return current;
-      }
-
-      if (activeTab !== "chat") {
-        setUnreadChatCount((count) => count + 1);
-      }
-
-      return [message, ...current].slice(0, 20);
-    });
-  }
+  }, [chatMessages]);
 
   useEffect(() => {
-    if (activeTab === "chat" && unreadChatCount) {
-      setUnreadChatCount(0);
-    }
-  }, [activeTab, unreadChatCount]);
-
-  useEffect(() => {
-    if (typeof document !== "undefined") {
-      document.title = unreadChatCount
-        ? `(${unreadChatCount}) TOGETHER | Listen Together. Instantly.`
-        : "TOGETHER | Listen Together. Instantly.";
-    }
-
-    if ("setAppBadge" in navigator) {
-      if (unreadChatCount > 0) {
-        navigator.setAppBadge(unreadChatCount).catch(() => {});
-      } else if ("clearAppBadge" in navigator) {
-        navigator.clearAppBadge().catch(() => {});
-      }
-    }
-  }, [unreadChatCount]);
-
-  async function attemptPlaybackResume(reason) {
-    if (!audioRef.current?.srcObject || awaitingGestureRef.current) {
-      return;
-    }
-
-    try {
-      await audioRef.current.play();
-      lastPlaybackAtRef.current = Date.now();
-      syncMediaSession("playing");
-      syncNativePlaybackState("playing", `Room ${roomId} is playing in the background.`);
-      pushDiagnostic(`Playback confirmed: ${reason}`);
-    } catch (_error) {
-      pushDiagnostic(`Playback resume blocked: ${reason}`);
-    }
-  }
-
-  async function requestWakeLock() {
-    if (!("wakeLock" in navigator) || wakeLockRef.current) {
-      return;
-    }
-
-    try {
-      wakeLockRef.current = await navigator.wakeLock.request("screen");
-      pushDiagnostic("Screen wake lock enabled");
-    } catch (_error) {
-      pushDiagnostic("Wake lock unavailable on this device");
-    }
-  }
-
-  async function releaseWakeLock() {
-    if (!wakeLockRef.current) {
-      return;
-    }
-
-    await wakeLockRef.current.release().catch(() => {});
-    wakeLockRef.current = null;
-    pushDiagnostic("Screen wake lock released");
-  }
-
-  function syncMediaSession(nextStatus) {
-    if (!("mediaSession" in navigator)) {
-      return;
-    }
-
-    if ("MediaMetadata" in window) {
-      navigator.mediaSession.metadata = new MediaMetadata({
-        title: "TOGETHER Live Audio",
-        artist: `Room ${roomId}`,
-        album: "Listen Together. Instantly."
-      });
-    }
-
-    navigator.mediaSession.playbackState = nextStatus === "playing" ? "playing" : "paused";
-
-    try {
-      navigator.mediaSession.setActionHandler("play", () => {
-        handleManualPlay();
-      });
-      navigator.mediaSession.setActionHandler("pause", () => {
-        audioRef.current?.pause();
-      });
-    } catch (_error) {
-      pushDiagnostic("Media controls unavailable");
-    }
-  }
-
-  function syncNativePlaybackState(nextStatus, detailText) {
-    if (!isNativeAndroidApp()) {
-      return;
-    }
-
-    const defaultText =
-      nextStatus === "playing"
-        ? `Room ${roomId} is playing in the background.`
-        : `Room ${roomId} is ready to resume.`;
-
-    updateNativeBackgroundPlaybackState({
-      title: "TOGETHER live audio",
-      text: detailText || defaultText,
-      playing: nextStatus === "playing"
-    }).catch(() => {});
-  }
-
-  function triggerPwaRecovery(reason) {
-    const now = Date.now();
-
-    if (!isInstalledPwaExperience() || now - lastRecoveryAtRef.current < 20000) {
-      return;
-    }
-
-    lastRecoveryAtRef.current = now;
-    setError("");
-    setStatus("Reconnecting");
-    setSessionNote("Restoring the live stream after the app was suspended.");
-    pushDiagnostic(`Recovery triggered: ${reason}`);
-    window.location.reload();
-  }
-
-  useEffect(() => {
-    const listener = getListenerSession();
-
-    if (!listener || listener.roomId !== roomId) {
-      navigate(`/join/${roomId}`);
-      return undefined;
-    }
-
-    if (!window.RTCPeerConnection) {
-      setError("This browser does not support WebRTC audio streaming.");
-      return undefined;
-    }
-
-    requestWakeLock();
-    if (isNativeAndroidApp()) {
-      enableNativeBackgroundPlayback({
-        title: "TOGETHER live audio",
-        text: `Room ${roomId} is connecting.`,
-        playing: false
-      }).catch(() => {});
-    }
-    pushDiagnostic("Listener ready");
     let isCancelled = false;
-    let usesLiveKit = false;
 
-    const peerConnection = createPeerConnection({
-      onIceCandidate: (candidate) => {
-        sendSessionEvent(roomId, {
-          type: "signal:ice-candidate",
-          senderId: listener.listenerId,
-          targetId: listener.hostId,
-          payload: {
-            candidate
-          }
-        }).catch(() => {});
-      },
-      onTrack: async (stream) => {
-        if (!audioRef.current) {
-          return;
+    // Verify session initially
+    fetchSession(normalizedRoomId)
+      .then((data) => {
+        if (!isCancelled) {
+          setSessionData(data);
+          setListenerCount((data.users?.length || 0) + 1);
         }
-
-        audioRef.current.srcObject = stream;
-        lastTrackAtRef.current = Date.now();
-        pushDiagnostic("Audio track received on listener");
-        setStatus("Ready to play");
-        setSessionNote("Sound is at the door. Tap play and give it a tiny beat.");
-
-        try {
-          await audioRef.current.play();
-          updateConnected(true);
-          lastPlaybackAtRef.current = Date.now();
-          setError("");
-          setStatus("Live");
-          updateAwaitingGesture(false);
-          setSessionNote(
-            "You are in. If the beat slips, tap play and let it catch up."
-          );
-          syncMediaSession("playing");
-          syncNativePlaybackState("playing", `Room ${roomId} is now playing.`);
-          pushDiagnostic("Playback started successfully");
-        } catch (_playbackError) {
-          setStatus("Tap play to start audio");
-          updateAwaitingGesture(true);
-          setSessionNote("One quick tap to wake the speakers, then give it a tiny beat.");
-          syncMediaSession("paused");
-          syncNativePlaybackState("paused", `Room ${roomId} is waiting for you to tap play.`);
-          pushDiagnostic("Playback blocked until user taps play");
+      })
+      .catch(() => {
+        if (!isCancelled) {
+          setSessionEnded(true);
+          setEndReason("This session does not exist or has expired.");
         }
+      });
+
+    // Create Socket.IO connection
+    const socket = createSocket();
+    socketRef.current = socket;
+
+    socket.on("connect", () => {
+      socket.emit("listener-joined-room", {
+        roomId: normalizedRoomId,
+        listenerId,
+        username
+      });
+    });
+
+    socket.on("user-count-updated", (data) => {
+      if (data.roomId === normalizedRoomId) {
+        setListenerCount(data.count || 1);
       }
     });
 
-    peerConnectionRef.current = peerConnection;
-    peerConnection.onconnectionstatechange = () => {
-      const nextState = peerConnection.connectionState;
-      pushDiagnostic(`Peer connection: ${nextState}`);
-
-        if (nextState === "connected") {
-          updateConnected(true);
-          setError("");
-          setStatus("Connected");
-          setSessionNote(
-            "Connected to the host. Waiting for the audio stream to begin."
-          );
-        }
-
-      if (nextState === "failed") {
-        setError("Peer connection failed on this device. Try rejoining the session.");
-        setSessionNote("The connection could not be completed on this device.");
+    socket.on("signal:offer", async (data) => {
+      if (data.targetListenerId && data.targetListenerId !== listenerId) {
+        return;
       }
-    };
 
-    peerConnection.oniceconnectionstatechange = () => {
-      pushDiagnostic(`ICE state: ${peerConnection.iceConnectionState}`);
-    };
-
-    async function pollEvents() {
       try {
-        const data = await fetchSessionEvents(
-          roomId,
-          listener.listenerId,
-          latestEventIdRef.current
-        );
+        if (peerConnectionRef.current) {
+          peerConnectionRef.current.close();
+        }
 
-        for (const event of data.events || []) {
-          latestEventIdRef.current = Math.max(latestEventIdRef.current, event.id);
-
-          if (!usesLiveKit && event.type === "signal:offer") {
-            pushDiagnostic("Offer received from host");
-            await peerConnection.setRemoteDescription(event.payload.offer);
-            const answer = await peerConnection.createAnswer();
-            await peerConnection.setLocalDescription(answer);
-            setStatus("Negotiating audio");
-            setSessionNote("Securely connecting your device to the host stream.");
-            pushDiagnostic("Answer created and sent");
-
-            await sendSessionEvent(roomId, {
-              type: "signal:answer",
-              senderId: listener.listenerId,
-              targetId: listener.hostId,
-              payload: {
-                answer
-              }
+        const pc = createPeerConnection({
+          onIceCandidate: (candidate) => {
+            socket.emit("signal:ice-candidate", {
+              roomId: normalizedRoomId,
+              targetId: data.senderId,
+              candidate,
+              senderId: listenerId
             });
-          }
-
-          if (!usesLiveKit && event.type === "signal:ice-candidate" && event.payload.candidate) {
-            await peerConnection.addIceCandidate(event.payload.candidate);
-            pushDiagnostic("ICE candidate added");
-          }
-
-          if (event.type === "chat-message") {
-            const privateToHost =
-              Boolean(event.targetId) && event.targetId === (roomSnapshot?.hostId || listener.hostId);
-            const privateReplyFromHost =
-              Boolean(event.targetId) && event.targetId === listener.listenerId;
-
-            pushChatMessage({
-              id: `${event.id}-${event.senderId}`,
-              senderName: event.payload.username || "Participant",
-              audience: privateReplyFromHost
-                ? "Private reply"
-                : privateToHost
-                  ? "Host only"
-                  : "Everyone",
-              message: event.payload.message
-            });
-          }
-        }
-
-        const nextPollDelay = connectedRef.current ? (hiddenRef.current ? 10000 : 5000) : 1200;
-        pollingRef.current = setTimeout(pollEvents, nextPollDelay);
-      } catch (pollError) {
-        if (String(pollError.message || "").includes("Session not found")) {
-          updateConnected(false);
-          setStatus("Session ended");
-          setError("The host session is no longer available.");
-          setSessionNote("This room is no longer active.");
-          clearListenerSession();
-          return;
-        }
-
-        setStatus("Network issue");
-        pushDiagnostic(`Polling error: ${pollError.message}`);
-        if (usesLiveKit && connectedRef.current) {
-          setError("");
-          setStatus("Live");
-          setSessionNote("Audio is live. Room updates are retrying quietly in the background.");
-        } else if (!connectedRef.current) {
-          setError("Phone could not connect to the live signaling server. Retry the session.");
-          setSessionNote("The app is trying to reconnect to the host.");
-        } else {
-          setError("");
-          setSessionNote("Audio is live. Connection checks are retrying quietly in the background.");
-        }
-        const retryDelay = connectedRef.current ? (hiddenRef.current ? 12000 : 6000) : 1800;
-        pollingRef.current = setTimeout(pollEvents, retryDelay);
-      }
-    }
-
-    async function startListener() {
-      setStatus("Joining room");
-      setSessionNote("Sliding into the room now. Tap play if your phone acts shy.");
-      pushDiagnostic("Joining room");
-      const initialRoom = await fetchSession(roomId);
-      usesLiveKit = isLiveKitSession(initialRoom);
-      setRoomSnapshot(initialRoom);
-      await joinSession(roomId, {
-        listenerId: listener.listenerId,
-        username: listener.username
-      });
-      pushDiagnostic("Listener registered");
-
-      if (usesLiveKit) {
-        setStatus("Connecting audio");
-        setSessionNote("Warming up the audio lane. Tap play and let it lock in.");
-        liveKitSessionRef.current = await connectListenerToLiveKitRoom({
-          roomId,
-          participantId: listener.listenerId,
-          participantName: listener.username || "Guest Listener",
-          audioElement: audioRef.current,
-          onStatusChange: (message) => {
-            pushDiagnostic(message);
           },
-          onAudioTrack: () => {
-            lastTrackAtRef.current = Date.now();
-            pushDiagnostic("Audio track received on listener");
-            setStatus("Ready to play");
-            setSessionNote(
-              "Sound is at the door. Tap play and give it a tiny beat."
-            );
-          },
-          onPlaybackStarted: () => {
-            updateConnected(true);
-            lastPlaybackAtRef.current = Date.now();
-            setError("");
-            setStatus("Live");
-            updateAwaitingGesture(false);
-            setSessionNote("You are in. The room is now playing nice and loud.");
-            syncMediaSession("playing");
-            syncNativePlaybackState("playing", `Room ${roomId} is now playing.`);
-            pushDiagnostic("Playback started successfully");
-          },
-          onPlaybackBlocked: () => {
-            setStatus("Tap play to start audio");
-            updateAwaitingGesture(true);
-            setSessionNote(
-              "One quick tap to wake the speakers, then give it a tiny beat."
-            );
-            syncMediaSession("paused");
-            syncNativePlaybackState("paused", `Room ${roomId} is waiting for you to tap play.`);
-            pushDiagnostic("Playback blocked until user taps play");
+          onTrack: (remoteStream) => {
+            attachRemoteAudio(remoteStream);
           }
         });
+
+        peerConnectionRef.current = pc;
+        await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+
+        const answer = await pc.createAnswer();
+        await pc.setLocalDescription(answer);
+
+        socket.emit("signal:answer", {
+          roomId: normalizedRoomId,
+          targetHostId: data.senderId,
+          answer,
+          senderId: listenerId
+        });
+
+        setIsConnected(true);
+      } catch (_err) {
+        // Connection negotiation error
       }
-
-      pollEvents();
-    }
-
-    startListener().catch((joinError) => {
-      setError(joinError.message || "Unable to join the session.");
-      setStatus("Unavailable");
-      setSessionNote("This device could not join the room.");
-      pushDiagnostic(`Join failed: ${joinError.message}`);
     });
 
-    async function pollRoomState() {
-      try {
-        const latestRoom = await fetchSession(roomId);
-        if (!isCancelled) {
-          setRoomSnapshot(latestRoom);
-        }
-      } catch (roomError) {
-        if (
-          !isCancelled &&
-          String(roomError.message || "").includes("Session not found")
-        ) {
-          updateConnected(false);
-          setStatus("Session ended");
-          setError("The host session is no longer available.");
-          setSessionNote("This room is no longer active.");
-          clearListenerSession();
-          return;
-        }
-      } finally {
-        if (!isCancelled) {
-          roomPollRef.current = window.setTimeout(pollRoomState, 3000);
-        }
-      }
-    }
-
-    pollRoomState();
-
-    playbackWatchdogRef.current = window.setInterval(() => {
-      const audio = audioRef.current;
-
-      if (!audio || awaitingGestureRef.current) {
+    socket.on("signal:ice-candidate", async (data) => {
+      if (data.targetId && data.targetId !== listenerId) {
         return;
       }
-
-      if (audio.srcObject && !audio.paused && !audio.ended) {
-        lastPlaybackAtRef.current = Date.now();
-        return;
+      if (peerConnectionRef.current && data.candidate) {
+        try {
+          await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
+        } catch (_err) {}
       }
+    });
 
-      const now = Date.now();
-      const hasRecentTrack = now - lastTrackAtRef.current < 20000;
-      const playbackStalled =
-        connectedRef.current &&
-        hasRecentTrack &&
-        now - lastPlaybackAtRef.current > 10000;
+    socket.on("chat-message", (msg) => {
+      setChatMessages((prev) => [...prev, msg]);
+    });
 
-      if (playbackStalled) {
-        attemptPlaybackResume("watchdog resume");
-      }
-
-      if (
-        isInstalledPwaExperience() &&
-        connectedRef.current &&
-        !audio.srcObject &&
-        now - lastPlaybackAtRef.current > 15000
-      ) {
-        triggerPwaRecovery("stream missing after background suspension");
-      }
-    }, 5000);
-
-    function handleVisibilityChange() {
-      hiddenRef.current = document.visibilityState !== "visible";
-
-      if (document.visibilityState === "hidden") {
-        syncMediaSession("playing");
-        syncNativePlaybackState("playing");
-        attemptPlaybackResume("app moved to background");
-        return;
-      }
-
-      if (document.visibilityState === "visible") {
-        requestWakeLock();
-        attemptPlaybackResume("app returned to foreground");
-      }
-    }
-
-    function handlePageShow() {
-      requestWakeLock();
-      attemptPlaybackResume("page restored");
-    }
-
-    function handleBlur() {
-      syncMediaSession("playing");
-      syncNativePlaybackState("playing");
-      attemptPlaybackResume("window blurred");
-    }
-
-    function handlePageHide() {
-      syncMediaSession("playing");
-      syncNativePlaybackState("playing");
-      attemptPlaybackResume("page hidden");
-    }
-
-    document.addEventListener("visibilitychange", handleVisibilityChange);
-    window.addEventListener("pageshow", handlePageShow);
-    window.addEventListener("blur", handleBlur);
-    window.addEventListener("pagehide", handlePageHide);
+    socket.on("session-ended", (data) => {
+      setSessionEnded(true);
+      setEndReason(data.reason || "The host ended the session.");
+      teardownPlayback();
+    });
 
     return () => {
       isCancelled = true;
-      document.removeEventListener("visibilitychange", handleVisibilityChange);
-      window.removeEventListener("pageshow", handlePageShow);
-      window.removeEventListener("blur", handleBlur);
-      window.removeEventListener("pagehide", handlePageHide);
-
-      if (pollingRef.current) {
-        clearTimeout(pollingRef.current);
+      if (socketRef.current) {
+        socketRef.current.emit("listener-left-room", {
+          roomId: normalizedRoomId,
+          listenerId
+        });
+        socketRef.current.disconnect();
       }
-
-      if (roomPollRef.current) {
-        clearTimeout(roomPollRef.current);
-      }
-
-      if (playbackWatchdogRef.current) {
-        clearInterval(playbackWatchdogRef.current);
-        playbackWatchdogRef.current = null;
-      }
-
-      leaveSessionInBackground(roomId, {
-        listenerId: listener.listenerId
-      });
-
-      if (peerConnectionRef.current) {
-        peerConnectionRef.current.close();
-      }
-
-      if (liveKitSessionRef.current) {
-        liveKitSessionRef.current.disconnect().catch(() => {});
-        liveKitSessionRef.current = null;
-      }
-
-      if (wakeLockRef.current) {
-        releaseWakeLock().catch(() => {});
-      }
-
-      if (isNativeAndroidApp()) {
-        disableNativeBackgroundPlayback().catch(() => {});
-      }
+      teardownPlayback();
     };
-  }, [navigate, roomId]);
+  }, [normalizedRoomId, listenerId, username]);
 
-  function handleVolumeChange(event) {
-    const nextVolume = Number(event.target.value);
-    setVolume(nextVolume);
+  function configureMediaSession() {
+    if ("mediaSession" in navigator) {
+      try {
+        navigator.mediaSession.metadata = new MediaMetadata({
+          title: sessionData?.hostName ? `${sessionData.hostName}'s Audio Room` : "TOGETHER Live Audio",
+          artist: "TOGETHER",
+          album: `Room ${normalizedRoomId}`,
+          artwork: [
+            { src: "/icon-192.svg", sizes: "192x192", type: "image/svg+xml" },
+            { src: "/icon-512.svg", sizes: "512x512", type: "image/svg+xml" }
+          ]
+        });
 
-    if (audioRef.current) {
-      audioRef.current.volume = nextVolume / 100;
+        navigator.mediaSession.playbackState = "playing";
+
+        navigator.mediaSession.setActionHandler("play", () => {
+          if (audioElementRef.current) {
+            audioElementRef.current.play();
+            setIsPlaying(true);
+            if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
+          }
+        });
+
+        navigator.mediaSession.setActionHandler("pause", () => {
+          if (audioElementRef.current) {
+            audioElementRef.current.pause();
+            setIsPlaying(false);
+            if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
+          }
+        });
+      } catch (_err) {}
     }
-  }
 
-  async function handleManualPlay() {
-    if (!audioRef.current) {
-      return;
-    }
-
-    try {
-      await audioRef.current.play();
-      updateConnected(true);
-      lastPlaybackAtRef.current = Date.now();
-      setError("");
-      setStatus("Live");
-      updateAwaitingGesture(false);
-      setSessionNote("Boom. You are in and the room is playing.");
-      syncMediaSession("playing");
-      syncNativePlaybackState("playing", `Room ${roomId} is now playing.`);
-      pushDiagnostic("Manual play succeeded");
-    } catch (_playError) {
-      setError("Audio playback is blocked. Please allow media playback in your browser.");
-      setSessionNote("Your browser is still blocking live audio playback.");
-      syncMediaSession("paused");
-      syncNativePlaybackState("paused", `Room ${roomId} is waiting to resume.`);
-      pushDiagnostic("Manual play failed");
-    }
-  }
-
-  async function handleLeaveRoom() {
-    const listener = getListenerSession();
-
-    setIsLeaving(true);
-
-    if (listener?.roomId === roomId) {
-      await leaveSession(roomId, {
-        listenerId: listener.listenerId
+    if (isNativeAndroidApp()) {
+      enableNativeBackgroundPlayback({
+        title: sessionData?.hostName ? `${sessionData.hostName}'s Room` : "TOGETHER Live Audio",
+        text: `Playing in background (Screen locked)`,
+        playing: true
       }).catch(() => {});
     }
-
-    clearListenerSession();
-    navigate(`/join/${roomId}`);
   }
 
-  async function handleSendChat() {
-    const listener = getListenerSession();
-
-    if (!listener) {
-      return;
+  function attachRemoteAudio(stream) {
+    if (!audioElementRef.current) {
+      audioElementRef.current = new Audio();
+      audioElementRef.current.autoplay = true;
+      audioElementRef.current.playsInline = true;
     }
 
-    const message = sanitizeChatMessage(chatInput);
+    const audio = audioElementRef.current;
+    audio.srcObject = stream;
+    audio.volume = isMuted ? 0 : volume;
 
-    if (!message) {
-      return;
-    }
-    const targetId = chatAudience === "host" ? roomSnapshot?.hostId || listener.hostId : null;
-
-    try {
-      await sendSessionEvent(roomId, {
-        type: "chat-message",
-        senderId: listener.listenerId,
-        targetId,
-        payload: {
-          username: listener.username || "Guest Listener",
-          message
+    audio.play()
+      .then(() => {
+        setIsPlaying(true);
+        setNeedsGesture(false);
+        configureMediaSession();
+        setupAudioVisualizer(stream);
+      })
+      .catch((err) => {
+        if (err.name === "NotAllowedError" || err.name === "AbortError") {
+          setNeedsGesture(true);
         }
       });
+  }
 
-      setChatInput("");
-    } catch (_error) {
-      setError("Message could not be sent.");
+  function setupAudioVisualizer(stream) {
+    try {
+      const AudioCtx = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtx) return;
+
+      if (!audioContextRef.current) {
+        audioContextRef.current = new AudioCtx();
+      }
+      const ctx = audioContextRef.current;
+      if (ctx.state === "suspended") {
+        ctx.resume();
+      }
+
+      const source = ctx.createMediaStreamSource(stream);
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 64;
+      source.connect(analyser);
+      analyserRef.current = analyser;
+
+      const dataArray = new Uint8Array(analyser.frequencyBinCount);
+      const updateMeter = () => {
+        if (!analyserRef.current) return;
+        analyserRef.current.getByteFrequencyData(dataArray);
+        let sum = 0;
+        for (let i = 0; i < dataArray.length; i++) {
+          sum += dataArray[i];
+        }
+        const avg = sum / dataArray.length;
+        setAudioLevel(Math.min(100, Math.round((avg / 128) * 100)));
+        animFrameRef.current = requestAnimationFrame(updateMeter);
+      };
+      updateMeter();
+    } catch (_err) {}
+  }
+
+  function teardownPlayback() {
+    if (animFrameRef.current) {
+      cancelAnimationFrame(animFrameRef.current);
+      animFrameRef.current = null;
+    }
+    if (audioContextRef.current) {
+      audioContextRef.current.close().catch(() => {});
+      audioContextRef.current = null;
+    }
+    if (peerConnectionRef.current) {
+      peerConnectionRef.current.close();
+      peerConnectionRef.current = null;
+    }
+    if (audioElementRef.current) {
+      audioElementRef.current.pause();
+      audioElementRef.current.srcObject = null;
+    }
+    if ("mediaSession" in navigator) {
+      try {
+        navigator.mediaSession.playbackState = "none";
+      } catch (_err) {}
+    }
+    if (isNativeAndroidApp()) {
+      disableNativeBackgroundPlayback().catch(() => {});
+    }
+    setIsConnected(false);
+    setIsPlaying(false);
+  }
+
+  function handleManualPlay() {
+    if (audioElementRef.current) {
+      audioElementRef.current.play()
+        .then(() => {
+          setIsPlaying(true);
+          setNeedsGesture(false);
+          configureMediaSession();
+          if (audioElementRef.current.srcObject) {
+            setupAudioVisualizer(audioElementRef.current.srcObject);
+          }
+        })
+        .catch(() => {});
     }
   }
 
-  const participantList = roomSnapshot
-    ? [
-        {
-          id: roomSnapshot.hostId,
-          username: roomSnapshot.hostName || "Host",
-          role: "Host"
-        },
-        ...(roomSnapshot.users || []).map((user) => ({
-          ...user,
-          role: "Listener"
-        }))
-      ]
-    : [];
+  function handleVolumeChange(e) {
+    const val = parseFloat(e.target.value);
+    setVolume(val);
+    setIsMuted(false);
+    if (audioElementRef.current) {
+      audioElementRef.current.volume = val;
+    }
+  }
 
-  const playerPanel = (
-    <div className="app-panel">
-      <div className="listener-quick-strip">
-        <div className="listener-quick-card">
-          <span>Fast tip</span>
-          <strong>Tap play once. Give it a beat.</strong>
-        </div>
-        <div className="listener-quick-card">
-          <span>Room status</span>
-          <strong>{connected ? "Locked in" : "Tuning in"}</strong>
-        </div>
-      </div>
-      <label className="volume-stack" htmlFor="volume">
-        Volume
-        <input
-          id="volume"
-          type="range"
-          min="0"
-          max="100"
-          value={volume}
-          onChange={handleVolumeChange}
-        />
-      </label>
-      <button
-        type="button"
-        className="button-secondary diagnostics-toggle"
-        onClick={() => setShowDiagnostics((current) => !current)}
-      >
-        {showDiagnostics ? "Hide Details" : "Connection Details"}
-      </button>
-      {showDiagnostics ? (
-        <div className="diagnostic-card">
-          <strong>Connection details</strong>
-          {diagnostics.map((item, index) => (
-            <p key={`${item}-${index}`} className="diagnostic-line">
-              {item}
-            </p>
-          ))}
-        </div>
-      ) : null}
-    </div>
-  );
+  function toggleMute() {
+    const nextMuted = !isMuted;
+    setIsMuted(nextMuted);
+    if (audioElementRef.current) {
+      audioElementRef.current.volume = nextMuted ? 0 : volume;
+    }
+  }
 
-  const peoplePanel = (
-    <div className="app-panel">
-      <div className="panel-heading">
-        <h2>People in this room</h2>
-        <span className="mini-caption">Live room presence</span>
-      </div>
-      <div className="listener-list">
-        {participantList.length === 0 ? (
-          <p className="empty-state">Room members will appear here.</p>
-        ) : (
-          participantList.map((user) => (
-            <div key={user.id} className="listener-pill participant-pill">
-              <span>{user.username}</span>
-              <strong>{user.role}</strong>
-            </div>
-          ))
-        )}
-      </div>
-    </div>
-  );
+  function handleSendChat(e) {
+    e.preventDefault();
+    const text = chatInput.trim();
+    if (!text || !socketRef.current) return;
 
-  const chatPanel = (
-    <div className="app-panel">
-      <div className="panel-heading">
-        <h2>Room chat</h2>
-        <span className="mini-caption">Newest messages stay at the top</span>
-      </div>
-      <div className="chat-feed chat-feed-large latest-first">
-        {chatMessages.length === 0 ? (
-          <p className="empty-state">Messages shared in this room will appear here.</p>
-        ) : (
-          chatMessages.map((message) => (
-            <div key={message.id} className="chat-bubble">
-              <div className="chat-meta">
-                <strong>{message.senderName}</strong>
-                <span>{message.audience}</span>
-              </div>
-              <p>{message.message}</p>
-            </div>
-          ))
-        )}
-      </div>
-      <div className="chat-compose">
-        <select
-          className="text-input chat-select"
-          value={chatAudience}
-          onChange={(event) => setChatAudience(event.target.value)}
-        >
-          <option value="everyone">Message everyone</option>
-          <option value="host">Message host only</option>
-        </select>
-        <input
-          className="text-input"
-          placeholder="Send a message"
-          value={chatInput}
-          maxLength={220}
-          onChange={(event) => setChatInput(event.target.value)}
-        />
-        <button type="button" className="button-primary" onClick={handleSendChat}>
-          Send
-        </button>
-      </div>
-    </div>
-  );
+    socketRef.current.emit("chat-message", {
+      roomId: normalizedRoomId,
+      senderId: listenerId,
+      senderName: username,
+      message: text
+    });
+    setChatInput("");
+  }
+
+  function handleLeave() {
+    teardownPlayback();
+    navigate("/");
+  }
 
   return (
-    <AppShell
-      lockNavigation={!isLeaving && status !== "Session ended" && status !== "Unavailable"}
-      lockLabel="Leave the room before navigating"
-    >
-      {isCompactViewport ? (
-        <section className="mobile-app-shell fade-in">
-          <div className="content-card mobile-hero-card">
-            <div className="mobile-title-row">
-              <div>
-                <p className="eyebrow">Listener view</p>
-                <h1>Listening live</h1>
+    <AppShell>
+      <div style={{ maxWidth: "980px", margin: "24px auto 0" }}>
+        {sessionEnded ? (
+          <div className="content-card fade-in" style={{ padding: "48px 32px", textAlign: "center", maxWidth: "500px", margin: "60px auto" }}>
+            <span style={{ fontSize: "3rem", display: "block", marginBottom: "12px" }}>🛑</span>
+            <h2 style={{ fontSize: "1.6rem", margin: "0 0 8px" }}>Session Ended</h2>
+            <p className="subtle-text" style={{ marginBottom: "24px" }}>{endReason}</p>
+            <Link to="/" className="button-primary" style={{ display: "inline-block", textDecoration: "none" }}>
+              Return to Home
+            </Link>
+          </div>
+        ) : (
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(320px, 1fr))", gap: "24px" }}>
+            {/* Player Column */}
+            <div className="content-card" style={{ padding: "28px" }}>
+              {/* Header Info */}
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "20px" }}>
+                <div>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
+                    <span className="live-pill" style={{
+                      display: "inline-flex",
+                      alignItems: "center",
+                      gap: "6px",
+                      background: isConnected ? "rgba(46, 204, 113, 0.15)" : "rgba(243, 156, 18, 0.15)",
+                      color: isConnected ? "#27ae60" : "#d35400",
+                      padding: "4px 10px",
+                      borderRadius: "999px",
+                      fontSize: "0.82rem",
+                      fontWeight: 700
+                    }}>
+                      <span style={{
+                        width: "8px",
+                        height: "8px",
+                        borderRadius: "50%",
+                        background: isConnected ? "#2ecc71" : "#f39c12"
+                      }} />
+                      {isConnected ? "LIVE AUDIO" : "CONNECTING..."}
+                    </span>
+                    <span className="subtle-text" style={{ fontSize: "0.85rem" }}>
+                      {normalizedRoomId}
+                    </span>
+                  </div>
+                  <h1 style={{ fontSize: "1.4rem", margin: "4px 0 0" }}>
+                    {sessionData?.hostName ? `${sessionData.hostName}'s Room` : "Live Broadcast"}
+                  </h1>
+                </div>
+
+                <button
+                  type="button"
+                  className="button-secondary"
+                  onClick={handleLeave}
+                  style={{ fontSize: "0.85rem", padding: "6px 12px", color: "#d9383a" }}
+                >
+                  Leave
+                </button>
               </div>
-              <StatusBadge tone={connected ? "success" : "warning"}>{status}</StatusBadge>
+
+              {/* Autoplay Unlock Banner */}
+              {needsGesture && (
+                <div style={{
+                  background: "rgba(255, 140, 66, 0.12)",
+                  border: "1px solid rgba(255, 140, 66, 0.4)",
+                  padding: "16px",
+                  borderRadius: "14px",
+                  textAlign: "center",
+                  marginBottom: "20px"
+                }}>
+                  <p style={{ margin: "0 0 10px", fontSize: "0.95rem", fontWeight: 600 }}>
+                    Tap below to start listening to the audio stream:
+                  </p>
+                  <button
+                    type="button"
+                    className="button-primary"
+                    onClick={handleManualPlay}
+                    style={{ justifyContent: "center", width: "100%", padding: "12px" }}
+                  >
+                    ▶️ Tap to Start Audio
+                  </button>
+                </div>
+              )}
+
+              {/* Music Streaming Visualizer & Disc */}
+              <div style={{
+                background: "rgba(0, 0, 0, 0.25)",
+                border: "1px solid var(--border-subtle)",
+                padding: "24px 16px",
+                borderRadius: "18px",
+                textAlign: "center",
+                marginBottom: "24px",
+                display: "flex",
+                flexDirection: "column",
+                alignItems: "center",
+                gap: "14px"
+              }}>
+                {/* Glowing vinyl disc */}
+                <div style={{
+                  width: "72px",
+                  height: "72px",
+                  borderRadius: "50%",
+                  background: "conic-gradient(from 0deg, var(--accent-primary), var(--accent-cyan), var(--accent-violet), var(--accent-primary))",
+                  boxShadow: isPlaying ? "0 0 24px var(--accent-primary-glow)" : "none",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  animation: isPlaying ? "rotateDisc 4s linear infinite" : "none"
+                }}>
+                  <div style={{
+                    width: "24px",
+                    height: "24px",
+                    borderRadius: "50%",
+                    background: "var(--bg-base)",
+                    border: "2px solid rgba(255,255,255,0.4)"
+                  }} />
+                </div>
+
+                {/* Animated EQ Bars */}
+                <div style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  gap: "4px",
+                  height: "44px"
+                }}>
+                  {[0.5, 0.9, 1.3, 1.7, 1.2, 0.8, 1.5, 0.6, 1.1, 1.6, 0.7, 1.4].map((mult, i) => {
+                    const h = isPlaying ? Math.max(6, Math.min(44, Math.round(audioLevel * mult * 0.45))) : 6;
+                    return (
+                      <div
+                        key={i}
+                        style={{
+                          width: "5px",
+                          height: `${h}px`,
+                          borderRadius: "3px",
+                          background: isPlaying && audioLevel > 5 ? "var(--accent-primary)" : "rgba(255, 255, 255, 0.15)",
+                          boxShadow: isPlaying && audioLevel > 5 ? "0 0 10px var(--accent-primary-glow)" : "none",
+                          transition: "height 0.08s ease"
+                        }}
+                      />
+                    );
+                  })}
+                </div>
+
+                <span className="subtle-text" style={{ fontSize: "0.82rem", fontWeight: 600 }}>
+                  {isPlaying ? (audioLevel > 5 ? "STREAMING • LOSSLESS 48KHZ STEREO" : "CONNECTED • AUDIO SOURCE QUIET") : "CONNECTING TO BROADCAST..."}
+                </span>
+              </div>
+
+              {/* Volume Slider & Controls */}
+              <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginBottom: "20px" }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                  <span className="field-label" style={{ margin: 0 }}>Volume</span>
+                  <button
+                    type="button"
+                    className="button-secondary"
+                    onClick={toggleMute}
+                    style={{ padding: "4px 10px", fontSize: "0.82rem" }}
+                  >
+                    {isMuted ? "🔇 Unmute" : "🔊 Mute"}
+                  </button>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max="1"
+                  step="0.01"
+                  value={isMuted ? 0 : volume}
+                  onChange={handleVolumeChange}
+                  style={{ width: "100%", accentColor: "#ff8c42", cursor: "pointer" }}
+                />
+              </div>
+
+              {/* Stats Bar */}
+              <div style={{
+                display: "flex",
+                justifyContent: "space-between",
+                padding: "12px 16px",
+                background: "rgba(0,0,0,0.02)",
+                borderRadius: "12px",
+                fontSize: "0.85rem"
+              }}>
+                <span className="subtle-text">Connected as: <strong>{username}</strong></span>
+                <span className="subtle-text">👥 Listeners: <strong>{listenerCount}</strong></span>
+              </div>
             </div>
 
-            <p className="subtle-text mobile-session-note">{sessionNote}</p>
-            {error ? <p className="error-banner">{error}</p> : null}
-
-            <audio
-              ref={audioRef}
-              autoPlay
-              playsInline
-              controls
-              className="debug-audio-player"
-              onPause={() => {
-                if (connectedRef.current && !awaitingGestureRef.current && hiddenRef.current) {
-                  attemptPlaybackResume("audio paused in background");
-                }
-              }}
-            />
-
-            <div className="mobile-stat-strip">
-              <div className="mobile-stat-pill">
-                <span>Room</span>
-                <strong>{roomId}</strong>
+            {/* Chat Column */}
+            <div className="content-card" style={{ padding: "24px", display: "flex", flexDirection: "column", height: "520px" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "16px", borderBottom: "1px solid rgba(0,0,0,0.06)", paddingBottom: "10px" }}>
+                <h3 style={{ margin: 0, fontSize: "1.1rem" }}>💬 Room Chat</h3>
+                <span className="subtle-text" style={{ fontSize: "0.82rem" }}>Live discussion</span>
               </div>
-              <div className="mobile-stat-pill">
-                <span>People</span>
-                <strong>{participantList.length}</strong>
-              </div>
-              <div className="mobile-stat-pill">
-                <span>Status</span>
-                <strong>{connected ? "Live" : "Connecting"}</strong>
-              </div>
-            </div>
 
-            <div className="mobile-primary-actions">
-              <button type="button" className="button-primary" onClick={handleManualPlay}>
-                {awaitingGesture ? "Enable Audio" : "Play"}
-              </button>
-              <button type="button" className="button-secondary" onClick={handleLeaveRoom}>
-                Leave
-              </button>
-            </div>
-          </div>
-
-          <div className="mobile-tab-dock" role="tablist" aria-label="Listener sections">
-            <button
-              type="button"
-              className={activeTab === "player" ? "mobile-tab-button active" : "mobile-tab-button"}
-              onClick={() => setActiveTab("player")}
-            >
-              Player
-            </button>
-            <button
-              type="button"
-              className={activeTab === "people" ? "mobile-tab-button active" : "mobile-tab-button"}
-              onClick={() => setActiveTab("people")}
-            >
-              People
-            </button>
-            <button
-              type="button"
-              className={activeTab === "chat" ? "mobile-tab-button active" : "mobile-tab-button"}
-              onClick={() => setActiveTab("chat")}
-            >
-              {unreadChatCount ? `Chat (${unreadChatCount})` : "Chat"}
-            </button>
-          </div>
-
-          <section className="content-card mobile-content-card">
-            {activeTab === "player" ? playerPanel : null}
-            {activeTab === "people" ? peoplePanel : null}
-            {activeTab === "chat" ? chatPanel : null}
-          </section>
-        </section>
-      ) : (
-      <section className="listener-shell fade-in">
-        <aside className="content-card listener-sidebar">
-          <div className="studio-brand">
-            <p className="eyebrow">Listener view</p>
-            <h2>Stay in sync</h2>
-            <p className="subtle-text">
-              Playback, room presence, and chat are separated so the listening experience stays focused.
-            </p>
-          </div>
-
-          <div className="studio-nav" role="tablist" aria-label="Listener sections">
-            <button
-              type="button"
-              className={activeTab === "player" ? "studio-nav-button active" : "studio-nav-button"}
-              onClick={() => setActiveTab("player")}
-            >
-              <strong>Player</strong>
-              <span>Audio controls and playback state</span>
-            </button>
-            <button
-              type="button"
-              className={activeTab === "people" ? "studio-nav-button active" : "studio-nav-button"}
-              onClick={() => setActiveTab("people")}
-            >
-              <strong>People</strong>
-              <span>See who is in the room right now</span>
-            </button>
-            <button
-              type="button"
-              className={activeTab === "chat" ? "studio-nav-button active" : "studio-nav-button"}
-              onClick={() => setActiveTab("chat")}
-            >
-              <strong>{unreadChatCount ? `Chat (${unreadChatCount})` : "Chat"}</strong>
-              <span>Message the host or the whole room</span>
-            </button>
-          </div>
-
-          <div className="studio-sidebar-footer">
-            <StatusBadge tone={connected ? "success" : "warning"}>{status}</StatusBadge>
-            <div className="button-row sidebar-actions">
-              <button type="button" className="button-primary" onClick={handleManualPlay}>
-                {awaitingGesture ? "Enable Audio" : "Play"}
-              </button>
-              <button
-                type="button"
-                className="button-secondary"
-                onClick={handleLeaveRoom}
+              {/* Messages list */}
+              <div
+                ref={chatScrollRef}
+                style={{
+                  flex: 1,
+                  overflowY: "auto",
+                  display: "flex",
+                  flexDirection: "column",
+                  gap: "10px",
+                  paddingRight: "6px",
+                  marginBottom: "16px"
+                }}
               >
-                Leave
-              </button>
+                {chatMessages.length === 0 ? (
+                  <p className="subtle-text" style={{ textAlign: "center", margin: "auto", fontSize: "0.88rem" }}>
+                    No messages yet. Say hello to the room!
+                  </p>
+                ) : (
+                  chatMessages.map((msg) => {
+                    const isMe = msg.senderId === listenerId;
+                    return (
+                      <div
+                        key={msg.id}
+                        style={{
+                          alignSelf: isMe ? "flex-end" : "flex-start",
+                          maxWidth: "80%",
+                          background: isMe ? "#ff8c42" : "rgba(0, 0, 0, 0.06)",
+                          color: isMe ? "#fff" : "inherit",
+                          padding: "8px 14px",
+                          borderRadius: "14px",
+                          fontSize: "0.9rem"
+                        }}
+                      >
+                        <span style={{
+                          display: "block",
+                          fontSize: "0.75rem",
+                          fontWeight: 700,
+                          opacity: 0.8,
+                          marginBottom: "2px"
+                        }}>
+                          {msg.senderName}
+                        </span>
+                        <p style={{ margin: 0, wordBreak: "break-word" }}>{msg.message}</p>
+                      </div>
+                    );
+                  })
+                )}
+              </div>
+
+              {/* Chat Input */}
+              <form onSubmit={handleSendChat} style={{ display: "flex", gap: "8px" }}>
+                <input
+                  type="text"
+                  placeholder="Send a message..."
+                  value={chatInput}
+                  onChange={(e) => setChatInput(e.target.value)}
+                  maxLength={200}
+                  className="text-input"
+                  style={{ flex: 1, padding: "10px 14px", fontSize: "0.9rem" }}
+                />
+                <button type="submit" className="button-primary" style={{ padding: "0 18px", fontSize: "0.9rem" }}>
+                  Send
+                </button>
+              </form>
             </div>
           </div>
-        </aside>
-
-        <article className="content-card listener-main">
-          <div className="section-header compact-section-header">
-            <div>
-              <p className="eyebrow">TOGETHER</p>
-              <h1>Listening live</h1>
-            </div>
-          </div>
-
-          <p className="hero-text compact">
-            Room <strong>{roomId}</strong> is connected to the shared audio session.
-          </p>
-          <p className="subtle-text listener-note">{sessionNote}</p>
-
-          {error ? <p className="error-banner">{error}</p> : null}
-
-          <audio
-            ref={audioRef}
-            autoPlay
-            playsInline
-            controls
-            className="debug-audio-player"
-            onPause={() => {
-              if (connectedRef.current && !awaitingGestureRef.current && hiddenRef.current) {
-                attemptPlaybackResume("audio paused in background");
-              }
-            }}
-          />
-
-          <div className="workspace-hero compact-workspace-hero compact-hero">
-            <div className="workspace-kpis">
-              <div className="workspace-stat">
-                <span>Room</span>
-                <strong>{roomId}</strong>
-              </div>
-              <div className="workspace-stat">
-                <span>People</span>
-                <strong>{participantList.length}</strong>
-              </div>
-              <div className="workspace-stat">
-                <span>Status</span>
-                <strong>{connected ? "Live" : "Connecting"}</strong>
-              </div>
-            </div>
-          </div>
-
-          <div className="player-card listener-stage">
-            {activeTab === "player" ? (
-              playerPanel
-            ) : null}
-
-            {activeTab === "people" ? (
-              peoplePanel
-            ) : null}
-
-            {activeTab === "chat" ? (
-              chatPanel
-            ) : null}
-          </div>
-        </article>
-      </section>
-      )}
+        )}
+      </div>
     </AppShell>
   );
 }

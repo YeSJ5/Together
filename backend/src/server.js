@@ -445,8 +445,15 @@ function emitUserCount(roomId) {
   });
 }
 
+const hostDisconnectTimers = new Map();
+
 io.on("connection", (socket) => {
   socket.on("host-created-room", ({ roomId, hostId }) => {
+    if (hostDisconnectTimers.has(roomId)) {
+      clearTimeout(hostDisconnectTimers.get(roomId));
+      hostDisconnectTimers.delete(roomId);
+    }
+
     const session = getRawSession(roomId);
 
     if (!session) {
@@ -536,7 +543,47 @@ io.on("connection", (socket) => {
     });
   });
 
+  socket.on("chat-message", ({ roomId, senderId, senderName, message }) => {
+    if (!roomId || !message) {
+      return;
+    }
+
+    const payload = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      roomId,
+      senderId,
+      senderName: senderName || "Participant",
+      message: String(message).trim(),
+      createdAt: Date.now()
+    };
+
+    io.to(roomId).emit("chat-message", payload);
+  });
+
+  socket.on("listener-left-room", ({ roomId, listenerId }) => {
+    if (!roomId || !listenerId) {
+      return;
+    }
+
+    const updated = updateSession(roomId, (draft) => {
+      draft.users = draft.users.filter((user) => user.id !== listenerId);
+    });
+
+    if (updated) {
+      io.to(roomId).emit("listener-disconnected", {
+        roomId,
+        listenerId
+      });
+      emitUserCount(roomId);
+    }
+  });
+
   socket.on("host-ended-session", ({ roomId }) => {
+    if (hostDisconnectTimers.has(roomId)) {
+      clearTimeout(hostDisconnectTimers.get(roomId));
+      hostDisconnectTimers.delete(roomId);
+    }
+
     const session = deleteSession(roomId);
 
     if (!session) {
@@ -556,15 +603,19 @@ io.on("connection", (socket) => {
     }
 
     if (role === "host") {
-      const session = deleteSession(roomId);
+      const timer = setTimeout(() => {
+        hostDisconnectTimers.delete(roomId);
+        const session = deleteSession(roomId);
 
-      if (session) {
-        io.to(roomId).emit("session-ended", {
-          roomId,
-          reason: "Host disconnected."
-        });
-      }
+        if (session) {
+          io.to(roomId).emit("session-ended", {
+            roomId,
+            reason: "Host ended the session."
+          });
+        }
+      }, 20000);
 
+      hostDisconnectTimers.set(roomId, timer);
       return;
     }
 

@@ -5,23 +5,7 @@
   "outputDirectory": "frontend/dist",
   "rewrites": [
     {
-      "source": "/host",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/join",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/join/:path*",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/session/:path*",
-      "destination": "/index.html"
-    },
-    {
-      "source": "/listen/:path*",
+      "source": "/(.*)",
       "destination": "/index.html"
     }
   ]
