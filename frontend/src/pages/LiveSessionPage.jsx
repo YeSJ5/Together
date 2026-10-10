@@ -209,14 +209,37 @@ export default function LiveSessionPage() {
     }
   }
 
+  // Ensure playback stays active when screen is locked or tab is hidden
+  useEffect(() => {
+    const handleResume = () => {
+      if (audioContextRef.current && audioContextRef.current.state === "suspended") {
+        audioContextRef.current.resume().catch(() => {});
+      }
+      if (audioElementRef.current && isPlaying && audioElementRef.current.paused) {
+        audioElementRef.current.play().catch(() => {});
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleResume);
+    window.addEventListener("focus", handleResume);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleResume);
+      window.removeEventListener("focus", handleResume);
+    };
+  }, [isPlaying]);
+
   function attachRemoteAudio(stream) {
-    if (!audioElementRef.current) {
-      audioElementRef.current = new Audio();
-      audioElementRef.current.autoplay = true;
-      audioElementRef.current.playsInline = true;
+    let audio = audioElementRef.current;
+    if (!audio) {
+      audio = new Audio();
+      audioElementRef.current = audio;
     }
 
-    const audio = audioElementRef.current;
+    audio.autoplay = true;
+    audio.playsInline = true;
+    audio.setAttribute("playsinline", "true");
+    audio.setAttribute("webkit-playsinline", "true");
     audio.srcObject = stream;
     audio.volume = isMuted ? 0 : volume;
 
@@ -375,6 +398,7 @@ export default function LiveSessionPage() {
 
   return (
     <AppShell>
+      <audio ref={audioElementRef} autoPlay playsInline style={{ display: "none" }} />
       <div style={{ maxWidth: "980px", margin: "24px auto 0" }}>
         {sessionEnded ? (
           <div className="content-card fade-in" style={{ padding: "48px 32px", textAlign: "center", maxWidth: "500px", margin: "60px auto" }}>

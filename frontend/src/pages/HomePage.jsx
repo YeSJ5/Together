@@ -12,7 +12,7 @@ export default function HomePage() {
   function handleHostStart(e) {
     e.preventDefault();
     const nameParam = hostName.trim() ? encodeURIComponent(hostName.trim()) : "Host";
-    navigate(`/host?name=${nameParam}&source=universal`);
+    navigate(`/host?name=${nameParam}&source=universal&autostart=1`);
   }
 
   function handleJoinSubmit(e) {

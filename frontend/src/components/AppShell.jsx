@@ -1,5 +1,6 @@
 import { Link, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
+import { API_BASE_URL } from "../config";
 
 export default function AppShell({ children }) {
   const location = useLocation();
@@ -14,6 +15,11 @@ export default function AppShell({ children }) {
     }
     return "dark"; // Default to immersive dark mode for music streaming feel
   });
+
+  useEffect(() => {
+    // Proactively warm up backend to eliminate broadcast setup delay
+    fetch(`${API_BASE_URL}/api/health`, { cache: "no-store" }).catch(() => {});
+  }, []);
 
   useEffect(() => {
     document.documentElement.dataset.theme = theme;

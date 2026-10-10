@@ -122,8 +122,16 @@ export default function HostDashboardPage() {
     analyser.smoothingTimeConstant = 0.6;
     analyserRef.current = analyser;
 
-    // Connect destination feed to analyser
-    destination.connect(analyser);
+    // Continuous inaudible sub-carrier oscillator to keep WebRTC RTP connection active in background/silence
+    try {
+      const carrier = ctx.createOscillator();
+      const carrierGain = ctx.createGain();
+      carrier.frequency.setValueAtTime(15, ctx.currentTime);
+      carrierGain.gain.setValueAtTime(0.00001, ctx.currentTime);
+      carrier.connect(carrierGain);
+      carrierGain.connect(destination);
+      carrier.start();
+    } catch (_cErr) {}
 
     // Microphone Gain Channel (DEFAULT 0.0 - MUTED)
     const micGain = ctx.createGain();
@@ -278,8 +286,13 @@ export default function HostDashboardPage() {
         throw new Error("No audio was selected. Remember to check 'Share audio' or 'Also share tab audio'.");
       }
 
-      // Stop video track immediately to save battery, CPU, and bandwidth
-      displayStream.getVideoTracks().forEach((t) => t.stop());
+      // Keep video tracks alive (disabled) so the browser capture pipeline doesn't terminate on app switch
+      displayStream.getVideoTracks().forEach((t) => {
+        t.enabled = false;
+        t.onended = () => {
+          stopAppAudioSharing();
+        };
+      });
 
       // If already had a stream, disconnect it
       if (appAudioSourceNodeRef.current) {
@@ -425,11 +438,18 @@ export default function HostDashboardPage() {
 
       // Keep mobile browsers alive in background (screen off / app switch)
       try {
-        const bgAudio = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAP8A/w==");
+        let bgAudio = bgAudioRef.current;
+        if (!bgAudio) {
+          bgAudio = new Audio("data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAP8A/w==");
+          bgAudioRef.current = bgAudio;
+        } else {
+          bgAudio.src = "data:audio/wav;base64,UklGRigAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQQAAAAAAP8A/w==";
+        }
         bgAudio.loop = true;
         bgAudio.volume = 0.001;
+        bgAudio.setAttribute("playsinline", "true");
+        bgAudio.setAttribute("webkit-playsinline", "true");
         bgAudio.play().catch(() => {});
-        bgAudioRef.current = bgAudio;
 
         if ("mediaSession" in navigator) {
           navigator.mediaSession.metadata = new MediaMetadata({
@@ -631,6 +651,40 @@ export default function HostDashboardPage() {
     };
   }, []);
 
+  const autostart = searchParams.get("autostart") === "1";
+  const hasAutoStartedRef = useRef(false);
+
+  useEffect(() => {
+    if (autostart && !session && !isStarting && !hasAutoStartedRef.current) {
+      hasAutoStartedRef.current = true;
+      handleStartSession();
+    }
+  }, [autostart, session, isStarting]);
+
+  useEffect(() => {
+    const handleVisibilityOrFocus = () => {
+      if (audioContextRef.current && audioContextRef.current.state === "suspended") {
+        audioContextRef.current.resume().catch(() => {});
+      }
+      if (session && "wakeLock" in navigator && !wakeLockRef.current) {
+        navigator.wakeLock.request("screen").then((wl) => {
+          wakeLockRef.current = wl;
+        }).catch(() => {});
+      }
+      if (bgAudioRef.current && bgAudioRef.current.paused) {
+        bgAudioRef.current.play().catch(() => {});
+      }
+    };
+
+    document.addEventListener("visibilitychange", handleVisibilityOrFocus);
+    window.addEventListener("focus", handleVisibilityOrFocus);
+
+    return () => {
+      document.removeEventListener("visibilitychange", handleVisibilityOrFocus);
+      window.removeEventListener("focus", handleVisibilityOrFocus);
+    };
+  }, [session]);
+
   function handleSendChat(e) {
     e.preventDefault();
     const text = chatInput.trim();
@@ -662,6 +716,30 @@ export default function HostDashboardPage() {
 
   // Pre-session Screen: One-Click Go Live
   if (!session) {
+    if (isStarting) {
+      return (
+        <AppShell>
+          <div style={{ maxWidth: "560px", margin: "60px auto 0", textAlign: "center" }}>
+            <div className="content-card fade-in" style={{ padding: "48px 32px", display: "flex", flexDirection: "column", alignItems: "center", gap: "20px" }}>
+              <div className="dj-turntable-wrapper">
+                <div className="dj-light-ring-outer" />
+                <div className="dj-light-ring-inner" />
+                <div className="dj-vinyl-disc" style={{ animationDuration: "1.2s" }}>
+                  <div className="dj-disc-center-label" />
+                </div>
+              </div>
+              <div>
+                <h2 style={{ fontSize: "1.6rem", margin: "0 0 8px", fontWeight: 800 }}>Initializing Live Studio...</h2>
+                <p className="subtle-text" style={{ fontSize: "0.95rem", margin: 0 }}>
+                  Connecting to broadcast stage & preparing your live room link...
+                </p>
+              </div>
+            </div>
+          </div>
+        </AppShell>
+      );
+    }
+
     return (
       <AppShell>
         <div style={{ maxWidth: "620px", margin: "40px auto 0" }}>
@@ -787,6 +865,7 @@ export default function HostDashboardPage() {
   // Active Broadcast Studio Console
   return (
     <AppShell>
+      <audio ref={bgAudioRef} loop playsInline style={{ display: "none" }} />
       <div ref={roomContainerRef} style={{ maxWidth: "1120px", margin: "16px auto 0", position: "relative" }}>
         {/* DJ Reactive Ambient Stage Light Orbs */}
         <div className="dj-ambient-stage">
