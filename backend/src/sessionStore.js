@@ -28,6 +28,9 @@ function sanitizeSession(session) {
 
   return {
     roomId: session.roomId,
+    title: session.title || `${session.hostName}'s Room`,
+    category: session.category || "Music",
+    isPublic: session.isPublic !== false,
     hostId: session.hostId,
     hostName: session.hostName,
     users: session.users,
@@ -36,14 +39,18 @@ function sanitizeSession(session) {
     audioSourceMode: session.audioSourceMode,
     mediaBackend: session.mediaBackend,
     nativeMobileRecommended: session.nativeMobileRecommended,
-    liveKitRoomName: session.liveKitRoomName || null
+    liveKitRoomName: session.liveKitRoomName || null,
+    currentTrack: session.currentTrack || null
   };
 }
 
 function createSession({
   hostId,
   hostName = "Host",
-  audioSourceMode = "device-audio",
+  title = "",
+  category = "Music",
+  isPublic = true,
+  audioSourceMode = "universal",
   mediaBackend = "webrtc-direct",
   nativeMobileRecommended = false,
   liveKitRoomName = null
@@ -51,6 +58,9 @@ function createSession({
   const roomId = generateUniqueRoomId();
   const session = {
     roomId,
+    title: title.trim() || `${hostName}'s Room`,
+    category: category || "Music",
+    isPublic: Boolean(isPublic),
     hostId,
     hostName,
     users: [],
@@ -60,12 +70,27 @@ function createSession({
     mediaBackend,
     nativeMobileRecommended,
     liveKitRoomName,
+    currentTrack: null,
     events: [],
     nextEventId: 1
   };
 
   sessions.set(roomId, session);
   return sanitizeSession(session);
+}
+
+function listActivePublicSessions() {
+  const result = [];
+  for (const session of sessions.values()) {
+    if (session.status === "active" && session.isPublic !== false) {
+      result.push(sanitizeSession(session));
+    }
+  }
+  // Sort by listeners count desc, then most recent
+  return result.sort((a, b) => {
+    const diff = (b.users?.length || 0) - (a.users?.length || 0);
+    return diff !== 0 ? diff : b.createdAt - a.createdAt;
+  });
 }
 
 function getSession(roomId) {
@@ -104,5 +129,6 @@ module.exports = {
   deleteSession,
   getRawSession,
   getSession,
+  listActivePublicSessions,
   updateSession
 };

@@ -423,54 +423,29 @@ PORT=5000
 CLIENT_ORIGIN=https://your-frontend.vercel.app
 ```
 
-## Current Product Highlights
+## Current Product Highlights (v2.0)
 
-- QR-based room join
-- real-time participant awareness
-- live audio hosting and listening
-- mobile join support
-- chat inside active room
-- cleaner host/listener UI
-- duplicate chat render bug fixed
-- TOGETHER kept as the canonical public product name
+- **Browser-First Background Playback**: Persistent floating mini-player preserving audio state across all internal route navigation.
+- **Live Public Stages Discovery**: Explore active broadcasts filtered by category (Music, Study, Lecture, Podcast, DJ).
+- **Live Speech-to-Text Transcripts & Subtitles**: Browser speech engine transcription broadcasting real-time captions for lectures and accessibility.
+- **Synchronized Track Announcement**: Host broadcasts track title and artist from Spotify, YouTube, or audio files with synchronized listener timeline.
+- **Audience Micro-Reactions**: Instant emoji reactions (`👏`, `🔥`, `❤️`, `🎉`, `⚡`) with floating animated toasts.
+- **Audio Settings & Diagnostics**: Microphone test meter, device switching, and Hi-Fi Stereo vs Speech Enhanced audio presets.
+- **QR & Station Code Joining**: Instant mobile join via camera QR scanner or room code.
+- **Zero App Required**: Runs directly in all modern desktop and mobile browsers.
 
 ## Known Limitations
 
-- no permanent database yet
-- sessions are lost if backend restarts
-- TURN infrastructure is not yet added for wider network robustness
-- mobile device-audio hosting is still limited by browser/platform restrictions
-- background audio behavior is browser dependent
+- In-memory session store (sessions reset if backend server process restarts).
+- Mobile browser background execution depends on OS battery saver and Web Audio wake lock policies.
+- P2P WebRTC mesh is optimal for small rooms (up to ~15 listeners). For massive audiences, SFU/LiveKit infrastructure can be enabled via configuration.
 
-## Future Enhancements
+## Creator Signature
 
-- Redis or MongoDB persistence
-- TURN server support
-- authentication and host moderation
-- room scheduling and expiry policies
-- analytics and attendance insights
-- richer mobile-native capabilities
-- push notifications and more advanced background playback support
-- optional recording or archive mode
+Engineered & designed with precision by **S_/_/**.
 
-## Academic Value
+## Repository & Deployment
 
-This project demonstrates:
-
-- full-stack system design
-- real-time media architecture
-- browser-based media capture
-- WebRTC integration
-- QR-driven UX for nearby-device workflows
-- responsive/PWA interface design
-- deployment architecture across frontend and backend platforms
-
-## Repository
-
-GitHub repository:
-
-[https://github.com/YeSJ5/Together](https://github.com/YeSJ5/Together)
-
-## Canonical Live Frontend
-
-Deploy the frontend under your preferred TOGETHER domain or Vercel URL.
+- GitHub Repository: [https://github.com/YeSJ5/Together](https://github.com/YeSJ5/Together)
+- Live Production App: [https://together-puce.vercel.app/](https://together-puce.vercel.app/)
+- Live Backend Health: [https://together-1-2zi8.onrender.com/api/health](https://together-1-2zi8.onrender.com/api/health)

@@ -6,6 +6,7 @@
     "postinstall": "npm --prefix frontend install",
     "setup": "npm --prefix backend install && npm --prefix frontend install",
     "build": "npm --prefix frontend run build && node -e \"const fs=require('fs'); fs.cpSync('frontend/dist', 'dist', {recursive:true});\"",
+    "test": "npm --prefix backend test",
     "start": "npm --prefix frontend run build && npm --prefix backend start",
     "start:backend": "npm --prefix backend start",
     "dev:backend": "npm --prefix backend run dev",

@@ -12,6 +12,7 @@ const {
   deleteSession,
   getRawSession,
   getSession,
+  listActivePublicSessions,
   updateSession
 } = require("./sessionStore");
 
@@ -113,8 +114,22 @@ app.get("/api/runtime", (request, response) => {
   });
 });
 
+app.get("/api/rooms", (_request, response) => {
+  response.json({
+    rooms: listActivePublicSessions()
+  });
+});
+
 app.post("/create-session", (request, response) => {
-  const { hostId, hostName, audioSourceMode, preferredTransport } = request.body || {};
+  const {
+    hostId,
+    hostName,
+    title,
+    category,
+    isPublic,
+    audioSourceMode,
+    preferredTransport
+  } = request.body || {};
 
   if (!hostId) {
     return response.status(400).json({
@@ -127,6 +142,9 @@ app.post("/create-session", (request, response) => {
   let session = createSession({
     hostId,
     hostName,
+    title,
+    category,
+    isPublic,
     audioSourceMode,
     mediaBackend: useLiveKit ? "livekit" : "webrtc-direct",
     nativeMobileRecommended: true,
@@ -140,6 +158,28 @@ app.post("/create-session", (request, response) => {
   }
 
   return response.status(201).json(session);
+});
+
+app.patch("/session/:id/track", (request, response) => {
+  const { currentTrack } = request.body || {};
+  const session = getRawSession(request.params.id);
+
+  if (!session) {
+    return response.status(404).json({
+      message: "Session not found or expired."
+    });
+  }
+
+  const updated = updateSession(request.params.id, (draft) => {
+    draft.currentTrack = currentTrack;
+  });
+
+  io.to(request.params.id).emit("playback-state-updated", {
+    roomId: request.params.id,
+    currentTrack
+  });
+
+  return response.json(updated);
 });
 
 app.post("/session/:id/livekit-token", async (request, response) => {
@@ -558,6 +598,50 @@ io.on("connection", (socket) => {
     };
 
     io.to(roomId).emit("chat-message", payload);
+  });
+
+  socket.on("reaction", ({ roomId, emoji, senderName }) => {
+    if (!roomId || !emoji) {
+      return;
+    }
+
+    io.to(roomId).emit("reaction", {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      roomId,
+      emoji: String(emoji).slice(0, 8),
+      senderName: senderName || "Listener",
+      createdAt: Date.now()
+    });
+  });
+
+  socket.on("transcript-chunk", ({ roomId, text, isFinal, senderName }) => {
+    if (!roomId || !text) {
+      return;
+    }
+
+    io.to(roomId).emit("transcript-chunk", {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+      roomId,
+      text: String(text).slice(0, 500),
+      isFinal: Boolean(isFinal),
+      senderName: senderName || "Host",
+      timestamp: Date.now()
+    });
+  });
+
+  socket.on("playback-sync", ({ roomId, currentTrack }) => {
+    if (!roomId) {
+      return;
+    }
+
+    updateSession(roomId, (draft) => {
+      draft.currentTrack = currentTrack;
+    });
+
+    socket.to(roomId).emit("playback-state-updated", {
+      roomId,
+      currentTrack
+    });
   });
 
   socket.on("listener-left-room", ({ roomId, listenerId }) => {

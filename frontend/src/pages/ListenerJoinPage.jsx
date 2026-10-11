@@ -219,20 +219,26 @@ export default function ListenerJoinPage() {
                   justifyContent: "space-between"
                 }}>
                   <div>
-                    <span style={{ color: "#888", display: "block", fontSize: "0.8rem" }}>Host</span>
+                    <span style={{ color: "var(--text-secondary)", display: "block", fontSize: "0.8rem" }}>Host</span>
                     <strong>{roomData?.hostName || "Host"}</strong>
                   </div>
                   <div>
-                    <span style={{ color: "#888", display: "block", fontSize: "0.8rem" }}>Audio Source</span>
-                    <strong style={{ textTransform: "capitalize" }}>
-                      {roomData?.audioSourceMode?.replace("-", " ") || "Live"}
+                    <span style={{ color: "var(--text-secondary)", display: "block", fontSize: "0.8rem" }}>Category</span>
+                    <strong style={{ color: "var(--accent-cyan)" }}>
+                      {roomData?.category || "Music"}
                     </strong>
                   </div>
                   <div>
-                    <span style={{ color: "#888", display: "block", fontSize: "0.8rem" }}>Listeners</span>
-                    <strong>{roomData?.users?.length || 0}</strong>
+                    <span style={{ color: "var(--text-secondary)", display: "block", fontSize: "0.8rem" }}>Listeners</span>
+                    <strong>{(roomData?.users?.length || 0) + 1}</strong>
                   </div>
                 </div>
+
+                {roomData?.title && (
+                  <p style={{ margin: "-10px 0 16px", fontSize: "0.92rem", fontWeight: 700, color: "var(--text-main)", textAlign: "center" }}>
+                    "{roomData.title}"
+                  </p>
+                )}
 
                 <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
                   <label className="field-block">

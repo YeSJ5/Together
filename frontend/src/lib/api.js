@@ -10,6 +10,13 @@ async function handleResponse(response) {
   return data;
 }
 
+export async function fetchPublicRooms() {
+  const response = await fetch(`${API_BASE_URL}/api/rooms`, {
+    cache: "no-store"
+  });
+  return handleResponse(response);
+}
+
 export async function createSession(payload) {
   const response = await fetch(`${API_BASE_URL}/create-session`, {
     method: "POST",
@@ -32,6 +39,19 @@ export async function fetchSession(roomId) {
 
 export async function updateSessionSource(roomId, payload) {
   const response = await fetch(`${API_BASE_URL}/session/${roomId}/source`, {
+    method: "PATCH",
+    cache: "no-store",
+    headers: {
+      "Content-Type": "application/json"
+    },
+    body: JSON.stringify(payload)
+  });
+
+  return handleResponse(response);
+}
+
+export async function updateSessionTrack(roomId, payload) {
+  const response = await fetch(`${API_BASE_URL}/session/${roomId}/track`, {
     method: "PATCH",
     cache: "no-store",
     headers: {

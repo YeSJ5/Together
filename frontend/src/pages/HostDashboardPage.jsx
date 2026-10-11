@@ -2,11 +2,13 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useSearchParams } from "react-router-dom";
 import QRCode from "react-qr-code";
 import AppShell from "../components/AppShell";
-import { createSession, endSession } from "../lib/api";
+import { useAudioRoom } from "../context/AudioRoomContext";
+import { createSession, endSession, updateSessionTrack } from "../lib/api";
 import { createAppId } from "../lib/ids";
 import { sanitizeDisplayName } from "../lib/sanitize";
 import { createSocket } from "../lib/socket";
 import { createPeerConnection } from "../lib/webrtc";
+import { createSpeechRecognizer, isSpeechRecognitionSupported } from "../lib/speechRecognition";
 import {
   disableNativeBackgroundPlayback,
   enableNativeBackgroundPlayback,
@@ -16,12 +18,21 @@ import {
 export default function HostDashboardPage() {
   const [searchParams] = useSearchParams();
   const initialName = searchParams.get("name") || "";
+  const initialTitle = searchParams.get("title") || "";
+  const initialCategory = searchParams.get("category") || "Music";
+
+  const { registerActiveSession, leaveActiveSession, setAudioLevel: setGlobalAudioLevel } = useAudioRoom();
 
   const [hostName, setHostName] = useState(initialName || "Host");
+  const [sessionTitle, setSessionTitle] = useState(initialTitle || "");
+  const [sessionCategory, setSessionCategory] = useState(initialCategory || "Music");
   const [session, setSession] = useState(null);
   const [isStarting, setIsStarting] = useState(false);
   const [error, setError] = useState("");
   const [copied, setCopied] = useState(false);
+  const [isTranscribing, setIsTranscribing] = useState(false);
+  const [liveReactions, setLiveReactions] = useState([]);
+  const [announcedTrack, setAnnouncedTrack] = useState("");
 
   // Audio Mixer Channels
   const [isMicOn, setIsMicOn] = useState(false); // DEFAULT FALSE (MUTED - MUSIC ONLY)
@@ -387,6 +398,7 @@ export default function HostDashboardPage() {
 
     await audio.play();
     setIsFilePlaying(true);
+    handleBroadcastTrack(file.name.replace(/\.[^/.]+$/, ""), hostName);
   }
 
   function toggleFilePlay() {
@@ -431,10 +443,24 @@ export default function HostDashboardPage() {
       const newSession = await createSession({
         hostId: hostIdRef.current,
         hostName: sanitizeDisplayName(hostName, "Host"),
+        title: sessionTitle.trim() || `${sanitizeDisplayName(hostName, "Host")}'s Room`,
+        category: sessionCategory || "Music",
+        isPublic: true,
         audioSourceMode: "universal"
       });
 
       setSession(newSession);
+
+      // Register session with global context for persistent audio
+      registerActiveSession({
+        roomId: newSession.roomId,
+        userRole: "host",
+        title: newSession.title,
+        host: newSession.hostName,
+        cat: newSession.category,
+        socket: null, // will be attached right below
+        cleanup: teardownSession
+      });
 
       // Keep mobile browsers alive in background (screen off / app switch)
       try {
@@ -564,6 +590,11 @@ export default function HostDashboardPage() {
       socket.on("chat-message", (msg) => {
         setChatMessages((prev) => [...prev, msg]);
       });
+
+      // Handle audience reactions
+      socket.on("reaction", (data) => {
+        setLiveReactions((prev) => [...prev.slice(-12), data]);
+      });
     } catch (err) {
       setError(err.message || "Failed to start live studio broadcast.");
     } finally {
@@ -637,6 +668,7 @@ export default function HostDashboardPage() {
     }
 
     setSession(null);
+    leaveActiveSession();
     setConnectedUsers([]);
     setChatMessages([]);
     setIsMicOn(false);
@@ -684,6 +716,74 @@ export default function HostDashboardPage() {
       window.removeEventListener("focus", handleVisibilityOrFocus);
     };
   }, [session]);
+
+  const speechRecognizerRef = useRef(null);
+
+  // Live Speech Recognition for Classroom / Lecture / Accessibility Mode
+  useEffect(() => {
+    if (isTranscribing && isMicOn) {
+      if (isSpeechRecognitionSupported()) {
+        const recognizer = createSpeechRecognizer({
+          onTranscript: ({ text, isFinal }) => {
+            if (socketRef.current && session?.roomId) {
+              socketRef.current.emit("transcript-chunk", {
+                roomId: session.roomId,
+                text,
+                isFinal,
+                senderName: `${hostName} (Host)`
+              });
+            }
+          },
+          onError: () => {}
+        });
+
+        if (recognizer) {
+          try {
+            recognizer.start();
+            speechRecognizerRef.current = recognizer;
+          } catch (_e) {}
+        }
+      }
+    } else {
+      if (speechRecognizerRef.current) {
+        try {
+          speechRecognizerRef.current.stop();
+        } catch (_e) {}
+        speechRecognizerRef.current = null;
+      }
+    }
+
+    return () => {
+      if (speechRecognizerRef.current) {
+        try {
+          speechRecognizerRef.current.stop();
+        } catch (_e) {}
+        speechRecognizerRef.current = null;
+      }
+    };
+  }, [isTranscribing, isMicOn, session, hostName]);
+
+  function handleBroadcastTrack(title, artist) {
+    if (!session?.roomId || !socketRef.current) return;
+    const cleanTitle = (title || "").trim();
+    const cleanArtist = (artist || hostName || "").trim();
+    if (!cleanTitle) return;
+
+    const track = {
+      title: cleanTitle,
+      artist: cleanArtist,
+      updatedAt: Date.now(),
+      isPlaying: true
+    };
+
+    socketRef.current.emit("playback-sync", {
+      roomId: session.roomId,
+      currentTrack: track
+    });
+
+    updateSessionTrack(session.roomId, { currentTrack: track }).catch(() => {});
+    setAnnouncedTrack(`${cleanTitle} — ${cleanArtist}`);
+  }
 
   function handleSendChat(e) {
     e.preventDefault();
@@ -805,6 +905,35 @@ export default function HostDashboardPage() {
                 />
               </label>
 
+              <label className="field-block">
+                <span className="field-label">Broadcast Title</span>
+                <input
+                  type="text"
+                  placeholder="e.g. Late Night Lo-Fi Session"
+                  value={sessionTitle}
+                  onChange={(e) => setSessionTitle(e.target.value)}
+                  maxLength={50}
+                  className="text-input"
+                  style={{ fontSize: "1rem", padding: "14px" }}
+                />
+              </label>
+
+              <label className="field-block">
+                <span className="field-label">Category</span>
+                <select
+                  value={sessionCategory}
+                  onChange={(e) => setSessionCategory(e.target.value)}
+                  className="text-input"
+                  style={{ fontSize: "1rem", padding: "14px" }}
+                >
+                  <option value="Music">🎵 Music & DJ</option>
+                  <option value="Study">📚 Study & Focus</option>
+                  <option value="Lecture">🎓 Classroom Lecture</option>
+                  <option value="Podcast">🎙️ Podcast & Talk</option>
+                  <option value="DJ">🎛️ DJ Stage</option>
+                </select>
+              </label>
+
               {/* Master studio spec overview */}
               <div
                 style={{
@@ -916,22 +1045,45 @@ export default function HostDashboardPage() {
                 >
                   {session.roomId}
                 </span>
+                <span
+                  style={{
+                    fontSize: "0.75rem",
+                    fontWeight: 700,
+                    padding: "2px 8px",
+                    borderRadius: "999px",
+                    background: "rgba(6, 182, 212, 0.15)",
+                    color: "var(--accent-cyan)"
+                  }}
+                >
+                  {session.category || sessionCategory || "Music"}
+                </span>
               </div>
               <span className="subtle-text" style={{ fontSize: "0.8rem" }}>
-                Lossless 48kHz Stereo Universal Broadcast
+                {session.title || sessionTitle || "Universal Audio Stream"} • Lossless 48kHz Stereo
               </span>
             </div>
           </div>
 
-          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+            <button
+              type="button"
+              className={`button-secondary ${isTranscribing ? "active-pill" : ""}`}
+              onClick={() => setIsTranscribing(!isTranscribing)}
+              title="Live speech-to-text subtitles for classroom / lecture / accessibility"
+              style={{ fontSize: "0.85rem", padding: "8px 14px" }}
+            >
+              {isTranscribing ? "🎙️ Captions ON [CC]" : "🎙️ Enable Captions [CC]"}
+            </button>
+
             <button
               type="button"
               className="button-secondary"
               onClick={handleCopyInvite}
               style={{ fontSize: "0.85rem", padding: "8px 14px" }}
             >
-              {copied ? "✓ Link Copied!" : "📋 Copy Invite Link"}
+              {copied ? "✓ Link Copied!" : "📋 Copy Link"}
             </button>
+
             <button
               type="button"
               className="button-danger"
@@ -941,6 +1093,70 @@ export default function HostDashboardPage() {
               End Broadcast
             </button>
           </div>
+        </div>
+
+        {/* Live Track Announcement & Broadcast Bar */}
+        <div
+          style={{
+            background: "rgba(255, 255, 255, 0.03)",
+            border: "1px solid var(--border-subtle)",
+            borderRadius: "var(--radius-control)",
+            padding: "10px 16px",
+            marginBottom: "20px",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "space-between",
+            flexWrap: "wrap",
+            gap: "10px"
+          }}
+        >
+          <div style={{ display: "flex", alignItems: "center", gap: "10px", flex: 1, minWidth: "260px" }}>
+            <span style={{ fontSize: "1.1rem" }}>🎵</span>
+            <input
+              type="text"
+              placeholder="Broadcast Track Name (Spotify, YouTube, Vinyl)..."
+              value={announcedTrack}
+              onChange={(e) => setAnnouncedTrack(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") {
+                  e.preventDefault();
+                  handleBroadcastTrack(announcedTrack, hostName);
+                }
+              }}
+              className="text-input"
+              style={{ padding: "6px 12px", fontSize: "0.86rem", flex: 1 }}
+            />
+            <button
+              type="button"
+              className="button-primary"
+              onClick={() => handleBroadcastTrack(announcedTrack, hostName)}
+              style={{ padding: "6px 14px", fontSize: "0.82rem", whiteSpace: "nowrap" }}
+            >
+              Sync Track
+            </button>
+          </div>
+
+          {/* Floating live reaction previews */}
+          {liveReactions.length > 0 && (
+            <div style={{ display: "flex", alignItems: "center", gap: "6px" }}>
+              <span className="subtle-text" style={{ fontSize: "0.78rem" }}>Reactions:</span>
+              {liveReactions.slice(-4).map((r) => (
+                <span
+                  key={r.id}
+                  className="fade-in"
+                  title={`${r.senderName} sent ${r.emoji}`}
+                  style={{
+                    fontSize: "1.1rem",
+                    background: "rgba(255,255,255,0.08)",
+                    padding: "2px 6px",
+                    borderRadius: "6px"
+                  }}
+                >
+                  {r.emoji}
+                </span>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* Studio Grid: Mixer Console (Left) + Backstage & Chat (Right) */}

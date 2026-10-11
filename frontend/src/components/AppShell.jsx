@@ -1,6 +1,9 @@
 import { Link, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { API_BASE_URL } from "../config";
+import FloatingMiniPlayer from "./FloatingMiniPlayer";
+import AudioDiagnosticsModal from "./AudioDiagnosticsModal";
+import AboutModal from "./AboutModal";
 
 export default function AppShell({ children }) {
   const location = useLocation();
@@ -8,6 +11,8 @@ export default function AppShell({ children }) {
   const [deferredPrompt, setDeferredPrompt] = useState(null);
   const [isInstalled, setIsInstalled] = useState(false);
   const [tipMessage, setTipMessage] = useState("");
+  const [isDiagnosticsOpen, setIsDiagnosticsOpen] = useState(false);
+  const [isAboutOpen, setIsAboutOpen] = useState(false);
   const [theme, setTheme] = useState(() => {
     const savedTheme = localStorage.getItem("together-theme");
     if (savedTheme === "dark" || savedTheme === "light") {
@@ -101,24 +106,29 @@ export default function AppShell({ children }) {
         <header className="topbar">
           <Link to="/" className="brand-link">
             <span className="brand-disc" />
-            <span>TOGETHER</span>
-            <span
-              style={{
-                fontSize: "0.68rem",
-                fontWeight: 800,
-                letterSpacing: "0.08em",
-                color: "var(--accent-primary)",
-                border: "1px solid rgba(16, 185, 129, 0.4)",
-                padding: "2px 8px",
-                borderRadius: "999px",
-                marginLeft: "2px"
-              }}
-            >
-              LIVE
-            </span>
+            <span className="brand-wordmark">TOGETHER</span>
+            <span className="live-header-pill">LIVE</span>
           </Link>
 
-          <div className="topbar-actions" style={{ position: "relative" }}>
+          <div className="topbar-actions">
+            <button
+              type="button"
+              className="button-secondary topbar-action-btn"
+              onClick={() => setIsDiagnosticsOpen(true)}
+              title="Audio settings and microphone test"
+            >
+              ⚙️ <span className="topbar-btn-text">Audio</span>
+            </button>
+
+            <button
+              type="button"
+              className="button-secondary topbar-action-btn"
+              onClick={() => setIsAboutOpen(true)}
+              title="About TOGETHER & Vision"
+            >
+              ℹ️ <span className="topbar-btn-text">About</span>
+            </button>
+
             {/* Small install icon button at top - hidden once installed */}
             {!isInstalled && (
               <div style={{ position: "relative", flexShrink: 0 }}>
@@ -127,25 +137,11 @@ export default function AppShell({ children }) {
                   onClick={handleInstallClick}
                   title="Install App"
                   aria-label="Install App"
-                  style={{
-                    display: "inline-flex",
-                    alignItems: "center",
-                    gap: "6px",
-                    padding: "6px 12px",
-                    borderRadius: "999px",
-                    background: "rgba(16, 185, 129, 0.2)",
-                    border: "1px solid rgba(16, 185, 129, 0.5)",
-                    color: "var(--accent-primary)",
-                    cursor: "pointer",
-                    fontSize: "0.8rem",
-                    fontWeight: 700,
-                    flexShrink: 0,
-                    transition: "all 0.2s ease"
-                  }}
+                  className="install-pill-btn"
                 >
                   <svg
-                    width="15"
-                    height="15"
+                    width="14"
+                    height="14"
                     viewBox="0 0 24 24"
                     fill="none"
                     stroke="currentColor"
@@ -157,39 +153,18 @@ export default function AppShell({ children }) {
                     <polyline points="7 10 12 15 17 10" />
                     <line x1="12" y1="15" x2="12" y2="3" />
                   </svg>
-                  <span>Install</span>
+                  <span className="topbar-btn-text">Install</span>
                 </button>
 
-                {/* Minimal auto-dismiss tooltip only if manual step is needed (iOS) */}
                 {tipMessage && (
-                  <div
-                    className="fade-in"
-                    style={{
-                      position: "absolute",
-                      top: "42px",
-                      right: 0,
-                      background: "var(--bg-surface-elevated)",
-                      border: "1px solid var(--border-accent)",
-                      borderRadius: "10px",
-                      padding: "8px 12px",
-                      fontSize: "0.78rem",
-                      fontWeight: 600,
-                      color: "var(--text-main)",
-                      whiteSpace: "nowrap",
-                      boxShadow: "0 10px 25px rgba(0,0,0,0.5)",
-                      zIndex: 100,
-                      display: "flex",
-                      alignItems: "center",
-                      gap: "8px"
-                    }}
-                  >
+                  <div className="tooltip-bubble fade-in">
                     <span>{tipMessage}</span>
                     <span
                       onClick={(e) => {
                         e.stopPropagation();
                         setTipMessage("");
                       }}
-                      style={{ cursor: "pointer", opacity: 0.6 }}
+                      style={{ cursor: "pointer", opacity: 0.7 }}
                     >
                       ✕
                     </span>
@@ -202,17 +177,13 @@ export default function AppShell({ children }) {
               type="button"
               className="button-secondary theme-toggle"
               onClick={() => setTheme((current) => (current === "dark" ? "light" : "dark"))}
-              style={{ fontSize: "0.82rem", padding: "6px 14px" }}
+              title="Toggle color theme"
             >
-              {theme === "dark" ? "☀️ Light" : "🌙 Dark"}
+              {theme === "dark" ? "☀️" : "🌙"}
             </button>
 
             {!isHome && (
-              <Link
-                to="/"
-                className="button-secondary topbar-home"
-                style={{ fontSize: "0.82rem", padding: "6px 14px" }}
-              >
+              <Link to="/" className="button-secondary topbar-home">
                 Home
               </Link>
             )}
@@ -220,7 +191,48 @@ export default function AppShell({ children }) {
         </header>
 
         {children}
+
+        {/* Global Footer with Creator's Signature S_/_/ */}
+        <footer className="app-footer">
+          <div className="footer-content">
+            <div className="footer-left">
+              <span className="brand-disc footer-disc" />
+              <span className="footer-brand">TOGETHER</span>
+              <span className="footer-tagline subtle-text">
+                • Browser-first real-time audio platform
+              </span>
+            </div>
+            <div className="footer-right">
+              <span className="footer-creator-text subtle-text">
+                Designed & Engineered with precision by{" "}
+                <button
+                  type="button"
+                  className="creator-signature-btn"
+                  onClick={() => setIsAboutOpen(true)}
+                  title="Creator's Signature & Story"
+                >
+                  S_/_/
+                </button>
+              </span>
+            </div>
+          </div>
+        </footer>
       </main>
+
+      {/* Floating Persistent Mini Player (Background Audio across internal navigation) */}
+      <FloatingMiniPlayer />
+
+      {/* Settings & Hardware Diagnostics Dialog */}
+      <AudioDiagnosticsModal
+        isOpen={isDiagnosticsOpen}
+        onClose={() => setIsDiagnosticsOpen(false)}
+      />
+
+      {/* About & Product Story Dialog */}
+      <AboutModal
+        isOpen={isAboutOpen}
+        onClose={() => setIsAboutOpen(false)}
+      />
     </div>
   );
 }

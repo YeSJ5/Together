@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import AppShell from "../components/AppShell";
+import { useAudioRoom } from "../context/AudioRoomContext";
 import { fetchSession } from "../lib/api";
 import { createAppId } from "../lib/ids";
 import { normalizeRoomId } from "../lib/sanitize";
@@ -18,6 +19,13 @@ export default function LiveSessionPage() {
   const navigate = useNavigate();
   const normalizedRoomId = normalizeRoomId(roomId);
 
+  const {
+    registerActiveSession,
+    leaveActiveSession,
+    addTranscriptChunk,
+    attachStreamToAudio
+  } = useAudioRoom();
+
   const [listenerId] = useState(() => createAppId("listener"));
   const [username] = useState(() => {
     const saved = getListenerSession();
@@ -33,6 +41,10 @@ export default function LiveSessionPage() {
   const [sessionEnded, setSessionEnded] = useState(false);
   const [endReason, setEndReason] = useState("");
   const [listenerCount, setListenerCount] = useState(1);
+  const [currentTrack, setCurrentTrack] = useState(null);
+  const [transcripts, setTranscripts] = useState([]);
+  const [captionsVisible, setCaptionsVisible] = useState(true);
+  const [liveReactions, setLiveReactions] = useState([]);
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState("");
   const [audioLevel, setAudioLevel] = useState(0);
@@ -63,6 +75,29 @@ export default function LiveSessionPage() {
         if (!isCancelled) {
           setSessionData(data);
           setListenerCount((data.users?.length || 0) + 1);
+          if (data.currentTrack) setCurrentTrack(data.currentTrack);
+
+          registerActiveSession({
+            roomId: normalizedRoomId,
+            userRole: "listener",
+            title: data.title || `${data.hostName}'s Room`,
+            host: data.hostName,
+            cat: data.category,
+            socket: null,
+            cleanup: teardownPlayback
+          });
+
+          try {
+            const prev = JSON.parse(localStorage.getItem("together-recent-rooms") || "[]");
+            const filtered = prev.filter((r) => r.roomId !== normalizedRoomId);
+            filtered.unshift({
+              roomId: normalizedRoomId,
+              title: data.title || `${data.hostName}'s Room`,
+              hostName: data.hostName,
+              category: data.category || "Music"
+            });
+            localStorage.setItem("together-recent-rooms", JSON.stringify(filtered.slice(0, 8)));
+          } catch (_e) {}
         }
       })
       .catch(() => {
@@ -146,6 +181,21 @@ export default function LiveSessionPage() {
 
     socket.on("chat-message", (msg) => {
       setChatMessages((prev) => [...prev, msg]);
+    });
+
+    socket.on("transcript-chunk", (chunk) => {
+      addTranscriptChunk(chunk);
+      setTranscripts((prev) => [...prev.slice(-15), chunk]);
+    });
+
+    socket.on("reaction", (data) => {
+      setLiveReactions((prev) => [...prev.slice(-10), data]);
+    });
+
+    socket.on("playback-state-updated", (data) => {
+      if (data.currentTrack) {
+        setCurrentTrack(data.currentTrack);
+      }
     });
 
     socket.on("session-ended", (data) => {
@@ -249,6 +299,7 @@ export default function LiveSessionPage() {
         setNeedsGesture(false);
         configureMediaSession();
         setupAudioVisualizer(stream);
+        attachStreamToAudio(stream);
       })
       .catch((err) => {
         if (err.name === "NotAllowedError" || err.name === "AbortError") {
@@ -341,8 +392,21 @@ export default function LiveSessionPage() {
     if (isNativeAndroidApp()) {
       disableNativeBackgroundPlayback().catch(() => {});
     }
+    leaveActiveSession();
     setIsConnected(false);
     setIsPlaying(false);
+  }
+
+  function handleSendReaction(emoji) {
+    if (!socketRef.current) return;
+    const reaction = {
+      id: `${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      roomId: normalizedRoomId,
+      emoji,
+      senderName: username
+    };
+    socketRef.current.emit("reaction", reaction);
+    setLiveReactions((prev) => [...prev.slice(-10), reaction]);
   }
 
   function handleManualPlay() {
@@ -446,21 +510,72 @@ export default function LiveSessionPage() {
                       <span className="subtle-text" style={{ fontSize: "0.85rem" }}>
                         {normalizedRoomId}
                       </span>
+                      <span
+                        style={{
+                          fontSize: "0.75rem",
+                          fontWeight: 700,
+                          padding: "2px 8px",
+                          borderRadius: "999px",
+                          background: "rgba(6, 182, 212, 0.15)",
+                          color: "var(--accent-cyan)"
+                        }}
+                      >
+                        {sessionData?.category || "Music"}
+                      </span>
                     </div>
-                    <h1 style={{ fontSize: "1.4rem", margin: "4px 0 0" }}>
-                      {sessionData?.hostName ? `${sessionData.hostName}'s Room` : "Live Broadcast"}
+                    <h1 style={{ fontSize: "1.35rem", margin: "4px 0 0", fontWeight: 800 }}>
+                      {sessionData?.title || (sessionData?.hostName ? `${sessionData.hostName}'s Room` : "Live Broadcast")}
                     </h1>
+                    <span className="subtle-text" style={{ fontSize: "0.84rem" }}>
+                      Hosted by {sessionData?.hostName || "Host"}
+                    </span>
                   </div>
 
-                  <button
-                    type="button"
-                    className="button-secondary"
-                    onClick={handleLeave}
-                    style={{ fontSize: "0.85rem", padding: "6px 12px", color: "#d9383a" }}
-                  >
-                    Leave
-                  </button>
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                    <button
+                      type="button"
+                      className={`button-secondary ${captionsVisible ? "active-pill" : ""}`}
+                      onClick={() => setCaptionsVisible(!captionsVisible)}
+                      title="Toggle live speech-to-text subtitles"
+                      style={{ fontSize: "0.82rem", padding: "6px 12px" }}
+                    >
+                      {captionsVisible ? "🎙️ [CC] ON" : "🎙️ [CC] OFF"}
+                    </button>
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={handleLeave}
+                      style={{ fontSize: "0.85rem", padding: "6px 12px", color: "var(--accent-rose)" }}
+                    >
+                      Leave
+                    </button>
+                  </div>
                 </div>
+
+                {/* Synchronized Now Playing Pill */}
+                {currentTrack?.title && (
+                  <div
+                    className="fade-in"
+                    style={{
+                      display: "flex",
+                      alignItems: "center",
+                      gap: "10px",
+                      background: "rgba(16, 185, 129, 0.1)",
+                      border: "1px solid rgba(16, 185, 129, 0.25)",
+                      padding: "8px 14px",
+                      borderRadius: "var(--radius-control)",
+                      marginBottom: "16px",
+                      fontSize: "0.86rem"
+                    }}
+                  >
+                    <span>🎵</span>
+                    <div>
+                      <strong style={{ color: "var(--text-main)" }}>Now Playing:</strong>{" "}
+                      <span>{currentTrack.title}</span>
+                      {currentTrack.artist && <span className="subtle-text"> • {currentTrack.artist}</span>}
+                    </div>
+                  </div>
+                )}
 
                 {/* Autoplay Unlock Banner */}
                 {needsGesture && (
@@ -500,44 +615,129 @@ export default function LiveSessionPage() {
                   gap: "14px"
                 }}>
                   {/* DJ Spinning Vinyl Turntable with Audio-Reactive Light Rings */}
-                  <div className="dj-turntable-wrapper">
-                    <div className="dj-light-ring-outer" />
-                    <div className="dj-light-ring-inner" />
-                    <div className="dj-vinyl-disc">
-                      <div className="dj-disc-center-label" />
+                  <div style={{ position: "relative" }}>
+                    <div className="dj-turntable-wrapper">
+                      <div className="dj-light-ring-outer" />
+                      <div className="dj-light-ring-inner" />
+                      <div className="dj-vinyl-disc">
+                        <div className="dj-disc-center-label" />
+                      </div>
                     </div>
+
+                    {/* Floating Reaction Emojis */}
+                    {liveReactions.length > 0 && (
+                      <div style={{
+                        position: "absolute",
+                        top: "-15px",
+                        right: "-20px",
+                        display: "flex",
+                        flexDirection: "column",
+                        gap: "6px",
+                        pointerEvents: "none"
+                      }}>
+                        {liveReactions.slice(-3).map((r) => (
+                          <div
+                            key={r.id}
+                            className="fade-in"
+                            style={{
+                              background: "rgba(0,0,0,0.75)",
+                              border: "1px solid var(--border-accent)",
+                              borderRadius: "999px",
+                              padding: "4px 10px",
+                              display: "flex",
+                              alignItems: "center",
+                              gap: "6px",
+                              boxShadow: "0 4px 15px rgba(0,0,0,0.5)"
+                            }}
+                          >
+                            <span style={{ fontSize: "1.2rem" }}>{r.emoji}</span>
+                            <span style={{ fontSize: "0.72rem", fontWeight: 700, color: "var(--text-main)" }}>
+                              {r.senderName}
+                            </span>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
-                {/* Animated EQ Bars */}
-                <div style={{
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  gap: "4px",
-                  height: "44px"
-                }}>
-                  {[0.5, 0.9, 1.3, 1.7, 1.2, 0.8, 1.5, 0.6, 1.1, 1.6, 0.7, 1.4].map((mult, i) => {
-                    const h = isPlaying ? Math.max(6, Math.min(44, Math.round(audioLevel * mult * 0.45))) : 6;
-                    return (
-                      <div
-                        key={i}
-                        style={{
-                          width: "5px",
-                          height: `${h}px`,
-                          borderRadius: "3px",
-                          background: isPlaying && audioLevel > 5 ? "var(--accent-primary)" : "rgba(255, 255, 255, 0.15)",
-                          boxShadow: isPlaying && audioLevel > 5 ? "0 0 10px var(--accent-primary-glow)" : "none",
-                          transition: "height 0.08s ease"
-                        }}
-                      />
-                    );
-                  })}
-                </div>
+                  {/* Animated EQ Bars */}
+                  <div style={{
+                    display: "flex",
+                    alignItems: "center",
+                    justifyContent: "center",
+                    gap: "4px",
+                    height: "44px"
+                  }}>
+                    {[0.5, 0.9, 1.3, 1.7, 1.2, 0.8, 1.5, 0.6, 1.1, 1.6, 0.7, 1.4].map((mult, i) => {
+                      const h = isPlaying ? Math.max(6, Math.min(44, Math.round(audioLevel * mult * 0.45))) : 6;
+                      return (
+                        <div
+                          key={i}
+                          style={{
+                            width: "5px",
+                            height: `${h}px`,
+                            borderRadius: "3px",
+                            background: isPlaying && audioLevel > 5 ? "var(--accent-primary)" : "rgba(255, 255, 255, 0.15)",
+                            boxShadow: isPlaying && audioLevel > 5 ? "0 0 10px var(--accent-primary-glow)" : "none",
+                            transition: "height 0.08s ease"
+                          }}
+                        />
+                      );
+                    })}
+                  </div>
 
-                <span className="subtle-text" style={{ fontSize: "0.82rem", fontWeight: 600 }}>
-                  {isPlaying ? (audioLevel > 5 ? "STREAMING • LOSSLESS 48KHZ STEREO" : "CONNECTED • AUDIO SOURCE QUIET") : "CONNECTING TO BROADCAST..."}
-                </span>
-              </div>
+                  <span className="subtle-text" style={{ fontSize: "0.82rem", fontWeight: 600 }}>
+                    {isPlaying ? (audioLevel > 5 ? "STREAMING • LOSSLESS 48KHZ STEREO" : "CONNECTED • AUDIO SOURCE QUIET") : "CONNECTING TO BROADCAST..."}
+                  </span>
+
+                  {/* Live Speech-to-Text Subtitles & Transcripts Drawer */}
+                  {captionsVisible && transcripts.length > 0 && (
+                    <div
+                      className="fade-in"
+                      style={{
+                        width: "100%",
+                        background: "rgba(0, 0, 0, 0.5)",
+                        border: "1px solid var(--border-subtle)",
+                        borderRadius: "var(--radius-control)",
+                        padding: "10px 14px",
+                        textAlign: "left",
+                        fontSize: "0.86rem",
+                        color: "var(--accent-cyan)",
+                        lineHeight: 1.5,
+                        boxShadow: "inset 0 2px 8px rgba(0,0,0,0.4)"
+                      }}
+                    >
+                      <div style={{ display: "flex", alignItems: "center", gap: "6px", marginBottom: "4px", fontSize: "0.74rem", fontWeight: 700, color: "var(--text-secondary)" }}>
+                        <span>🎙️ LIVE CAPTIONS:</span>
+                      </div>
+                      <p style={{ margin: 0 }}>
+                        "{transcripts[transcripts.length - 1].text}"
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Quick Audience Reactions Bar */}
+                  <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "4px" }}>
+                    <span className="subtle-text" style={{ fontSize: "0.8rem", fontWeight: 600 }}>React:</span>
+                    {["👏", "🔥", "❤️", "🎉", "⚡"].map((emoji) => (
+                      <button
+                        key={emoji}
+                        type="button"
+                        onClick={() => handleSendReaction(emoji)}
+                        title={`Send ${emoji} reaction`}
+                        className="button-secondary"
+                        style={{
+                          padding: "6px 12px",
+                          fontSize: "1.1rem",
+                          borderRadius: "999px",
+                          background: "rgba(255,255,255,0.06)"
+                        }}
+                      >
+                        {emoji}
+                      </button>
+                    ))}
+                  </div>
+                </div>
 
               {/* Volume Slider & Controls */}
               <div style={{ display: "flex", flexDirection: "column", gap: "12px", marginBottom: "20px" }}>
