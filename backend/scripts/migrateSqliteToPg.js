@@ -85,7 +85,18 @@ async function runMigration(options = {}) {
   console.log(`Source SQLite:   ${sqlitePath}`);
   console.log(`Target Database: ${sanitizeConnectionString(pgUrl)}`);
   console.log(`Execution Mode:  ${isDryRun ? "DRY-RUN (Validation & Backup only)" : "LIVE MIGRATION"}`);
-  console.log("=======================================================\n");
+  // Environment Guard: Guard against polluting remote production with local test data
+  const isDefaultLocalSource = !options.sqlitePath && !process.env.TOGETHER_DB_PATH;
+  const isRemoteTarget = pgUrl && !pgUrl.includes("localhost") && !pgUrl.includes("127.0.0.1");
+
+  if (isDefaultLocalSource && isRemoteTarget && !options.allowLocalDevData) {
+    console.warn("[ENVIRONMENT GUARD] Detected remote PostgreSQL target with local workspace SQLite source.");
+    console.warn("  The local file 'backend/data/together.sqlite' contains local development/test data, NOT production container data.");
+    console.warn("  To prevent polluting production with test records, specify --sqlite <path-to-prod-backup> or --allow-local-dev-data.");
+    if (!isDryRun) {
+      throw new Error("Refusing to migrate local development SQLite data into remote production database without --allow-local-dev-data.");
+    }
+  }
 
   // 1. Read SQLite Source
   if (!fs.existsSync(sqlitePath)) {
@@ -339,12 +350,13 @@ async function runMigration(options = {}) {
 if (require.main === module) {
   const args = process.argv.slice(2);
   const dryRun = args.includes("--dry-run");
+  const allowLocalDevData = args.includes("--allow-local-dev-data");
   const pgIndex = args.indexOf("--pg");
   const pgUrl = pgIndex !== -1 ? args[pgIndex + 1] : process.env.DATABASE_URL;
   const sqliteIndex = args.indexOf("--sqlite");
   const sqlitePath = sqliteIndex !== -1 ? args[sqliteIndex + 1] : null;
 
-  runMigration({ dryRun, pgUrl, sqlitePath })
+  runMigration({ dryRun, pgUrl, sqlitePath, allowLocalDevData })
     .then(() => process.exit(0))
     .catch((e) => {
       console.error(e);

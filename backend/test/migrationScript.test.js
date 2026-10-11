@@ -50,3 +50,18 @@ test("Migration Script: Performs pre-migration backup and dry-run verification w
     fs.unlinkSync(result.backupFile);
   } catch (_e) {}
 });
+
+test("Migration Script: Environment Guard rejects remote PostgreSQL without explicit allowLocalDevData when source is local dev file", async () => {
+  await assert.rejects(
+    async () => {
+      await runMigration({
+        pgUrl: "postgresql://user:pass@db.render.com:5432/together",
+        dryRun: false,
+        allowLocalDevData: false
+      });
+    },
+    {
+      message: /Refusing to migrate local development SQLite data into remote production database/
+    }
+  );
+});
