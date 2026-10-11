@@ -26,6 +26,11 @@ class TogetherDatabase {
     this.db = null;
     this.isPg = Boolean(this.databaseUrl && (this.databaseUrl.startsWith("postgres://") || this.databaseUrl.startsWith("postgresql://")) && pg);
     this.isSqlite = !this.isPg && Boolean(DatabaseSync);
+    this.cache = {
+      rooms: new Map(),
+      user_profiles: new Map(),
+      room_events: []
+    };
     this.jsonStore = {
       rooms: new Map(),
       user_profiles: new Map(),
@@ -57,9 +62,11 @@ class TogetherDatabase {
         }
 
         this.pgPool = new pg.Pool(poolConfig);
-        this.runPgMigrations().catch((err) => {
-          console.error("[DB] PostgreSQL migration failed:", err.message);
-        });
+        this.runPgMigrations()
+          .then(() => this.hydratePgCache())
+          .catch((err) => {
+            console.error("[DB] PostgreSQL migration or cache hydration failed:", err.message);
+          });
         return;
       } catch (err) {
         console.warn("[DB] PostgreSQL initialization failed, falling back to SQLite/JSON:", err.message);
@@ -205,6 +212,34 @@ class TogetherDatabase {
     }
   }
 
+  async hydratePgCache() {
+    if (!this.pgPool) return;
+    try {
+      const roomRes = await this.pgPool.query(
+        "SELECT * FROM rooms WHERE status = 'active' ORDER BY created_at DESC LIMIT 200"
+      );
+      for (const row of roomRes.rows || []) {
+        const formatted = this.formatRoomRow(row);
+        this.cache.rooms.set(formatted.roomId, formatted);
+      }
+
+      const profileRes = await this.pgPool.query(
+        "SELECT * FROM user_profiles ORDER BY last_seen_at DESC LIMIT 500"
+      );
+      for (const row of profileRes.rows || []) {
+        this.cache.user_profiles.set(row.user_id, {
+          userId: row.user_id,
+          username: row.username,
+          role: row.role,
+          createdAt: Number(row.created_at),
+          lastSeenAt: Number(row.last_seen_at)
+        });
+      }
+    } catch (err) {
+      console.warn("[DB] Could not hydrate PostgreSQL cache:", err.message);
+    }
+  }
+
   runSqliteMigrations() {
     if (!this.isSqlite || !this.db) return;
 
@@ -282,6 +317,11 @@ class TogetherDatabase {
   upsertRoom(room) {
     const now = Date.now();
     const currentTrackJson = room.currentTrack ? JSON.stringify(room.currentTrack) : null;
+
+    this.cache.rooms.set(room.roomId, {
+      ...room,
+      updatedAt: now
+    });
 
     if (this.isPg && this.pgPool) {
       const query = `
@@ -387,6 +427,11 @@ class TogetherDatabase {
       return this.formatRoomRow(row);
     }
 
+    if (this.isPg) {
+      const room = this.cache.rooms.get(roomId);
+      return room ? { ...room } : null;
+    }
+
     const room = this.jsonStore.rooms.get(roomId);
     return room ? { ...room } : null;
   }
@@ -401,6 +446,16 @@ class TogetherDatabase {
       return rows.map((r) => this.formatRoomRow(r));
     }
 
+    if (this.isPg) {
+      const res = [];
+      for (const r of this.cache.rooms.values()) {
+        if (r.status === "active" && r.isPublic !== false) {
+          res.push({ ...r });
+        }
+      }
+      return res.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    }
+
     const res = [];
     for (const r of this.jsonStore.rooms.values()) {
       if (r.status === "active" && r.isPublic !== false) {
@@ -412,6 +467,13 @@ class TogetherDatabase {
 
   deleteOrEndRoom(roomId) {
     const now = Date.now();
+
+    const cached = this.cache.rooms.get(roomId);
+    if (cached) {
+      cached.status = "ended";
+      cached.endedAt = now;
+      cached.updatedAt = now;
+    }
 
     if (this.isPg && this.pgPool) {
       this.pgPool.query(
@@ -433,7 +495,7 @@ class TogetherDatabase {
       room.updatedAt = now;
       this.persistJsonStore();
     }
-    return room || null;
+    return room || cached || null;
   }
 
   formatRoomRow(row) {
@@ -468,6 +530,14 @@ class TogetherDatabase {
   upsertUserProfile(userId, username, role = "listener") {
     if (!userId) return;
     const now = Date.now();
+
+    this.cache.user_profiles.set(userId, {
+      userId,
+      username: username || "User",
+      role: role || "listener",
+      createdAt: now,
+      lastSeenAt: now
+    });
 
     if (this.isPg && this.pgPool) {
       this.pgPool.query(`
@@ -515,6 +585,10 @@ class TogetherDatabase {
         createdAt: Number(row.created_at),
         lastSeenAt: Number(row.last_seen_at)
       };
+    }
+
+    if (this.isPg) {
+      return this.cache.user_profiles.get(userId) || null;
     }
 
     return this.jsonStore.user_profiles.get(userId) || null;

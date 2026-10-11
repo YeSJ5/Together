@@ -99,7 +99,7 @@ app.use((request, response, next) => {
 app.get("/api", (_request, response) => {
   response.json({
     product: "TOGETHER",
-    version: "2.3.0",
+    version: "2.4.0",
     status: "running"
   });
 });
@@ -113,11 +113,11 @@ app.get("/api/health", async (_request, response) => {
     const ice = getIceServerConfig();
     const activePublicRooms = listActivePublicSessions();
 
-    const isHealthy = dbHealth.healthy !== false;
+    const isHealthy = dbHealth.healthy !== false && dbHealth.status === "connected";
 
     return response.status(isHealthy ? 200 : 503).json({
       product: "TOGETHER",
-      version: "2.3.0",
+      version: "2.4.0",
       status: isHealthy ? "ok" : "degraded",
       ready: isHealthy,
       uptimeSeconds: Math.floor(process.uptime()),
@@ -137,7 +137,8 @@ app.get("/api/health", async (_request, response) => {
         memoryRssMb: Math.round(mem.rss / 1024 / 1024),
         heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024)
       },
-      turnConfigured: ice.hasTurn
+      turnConfigured: ice.hasTurn,
+      turnType: ice.turnType || "none"
     });
   } catch (error) {
     logger.error("Health check error", { error: error.message });

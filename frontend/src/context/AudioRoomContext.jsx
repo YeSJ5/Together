@@ -76,14 +76,16 @@ export function AudioRoomProvider({ children }) {
   }, [isPlaying]);
 
   const attachStreamToAudio = useCallback((stream) => {
-    if (!persistentAudioRef.current) return;
+    if (!persistentAudioRef.current) return Promise.resolve(false);
     const audio = persistentAudioRef.current;
     audio.srcObject = stream;
     audio.volume = isMuted ? 0 : volume;
-    audio.play().then(() => {
+    return audio.play().then(() => {
       setIsPlaying(true);
-    }).catch(() => {
+      return true;
+    }).catch((err) => {
       setIsPlaying(false);
+      throw err;
     });
   }, [isMuted, volume]);
 

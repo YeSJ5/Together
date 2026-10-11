@@ -1,3 +1,9 @@
+databases:
+  - name: together-postgres
+    databaseName: together
+    user: together_user
+    plan: free
+
 services:
   - type: web
     name: together-backend
@@ -8,4 +14,18 @@ services:
     healthCheckPath: /api/health
     envVars:
       - key: CLIENT_ORIGIN
+        sync: false
+      - key: DATABASE_URL
+        fromDatabase:
+          name: together-postgres
+          property: connectionString
+      - key: TURN_URLS
+        sync: false
+      - key: TURN_SECRET
+        sync: false
+      - key: LIVEKIT_URL
+        sync: false
+      - key: LIVEKIT_API_KEY
+        sync: false
+      - key: LIVEKIT_API_SECRET
         sync: false

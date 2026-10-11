@@ -83,3 +83,45 @@ test("sessionStore: restores room from durable database on process reload", () =
   deleteSession(roomId);
 });
 
+test("database: TogetherDatabase health reporting, storage type detection, and graceful degradation", async () => {
+  const { TogetherDatabase } = require("../src/db/database");
+
+  // 1. In-memory SQLite instance
+  const testDb = new TogetherDatabase({ dbPath: ":memory:" });
+  const health = await testDb.checkHealth();
+  assert.strictEqual(health.status, "connected");
+  assert.strictEqual(health.healthy, true);
+  assert.strictEqual(health.driver, "sqlite");
+  assert.ok(["local-disk", "ephemeral-container"].includes(health.storageType));
+
+  // 2. Room CRUD in database directly
+  testDb.upsertRoom({
+    roomId: "ROOM-DBTEST",
+    title: "Database Test Room",
+    category: "Study",
+    isPublic: true,
+    hostId: "host-db-1",
+    hostName: "DB Host",
+    status: "active"
+  });
+
+  const retrieved = testDb.getRoom("ROOM-DBTEST");
+  assert.ok(retrieved);
+  assert.strictEqual(retrieved.title, "Database Test Room");
+
+  const publicRooms = testDb.listPublicActiveRooms();
+  assert.ok(publicRooms.some((r) => r.roomId === "ROOM-DBTEST"));
+
+  testDb.deleteOrEndRoom("ROOM-DBTEST");
+  const ended = testDb.getRoom("ROOM-DBTEST");
+  assert.strictEqual(ended.status, "ended");
+
+  testDb.close();
+
+  // 3. Degraded reporting when database is closed or disconnected
+  const degradedHealth = await testDb.checkHealth();
+  assert.strictEqual(degradedHealth.healthy, false);
+  assert.strictEqual(degradedHealth.status, "degraded");
+});
+
+

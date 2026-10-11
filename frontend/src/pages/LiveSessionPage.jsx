@@ -23,7 +23,8 @@ export default function LiveSessionPage() {
     registerActiveSession,
     leaveActiveSession,
     addTranscriptChunk,
-    attachStreamToAudio
+    attachStreamToAudio,
+    persistentAudioRef
   } = useAudioRoom();
 
   const [listenerId] = useState(() => createAppId("listener"));
@@ -283,29 +284,16 @@ export default function LiveSessionPage() {
   }, [isPlaying]);
 
   function attachRemoteAudio(stream) {
-    let audio = audioElementRef.current;
-    if (!audio) {
-      audio = new Audio();
-      audioElementRef.current = audio;
-    }
+    setupAudioVisualizer(stream);
+    configureMediaSession();
 
-    audio.autoplay = true;
-    audio.playsInline = true;
-    audio.setAttribute("playsinline", "true");
-    audio.setAttribute("webkit-playsinline", "true");
-    audio.srcObject = stream;
-    audio.volume = isMuted ? 0 : volume;
-
-    audio.play()
+    attachStreamToAudio(stream)
       .then(() => {
         setIsPlaying(true);
         setNeedsGesture(false);
-        configureMediaSession();
-        setupAudioVisualizer(stream);
-        attachStreamToAudio(stream);
       })
       .catch((err) => {
-        if (err.name === "NotAllowedError" || err.name === "AbortError") {
+        if (err && (err.name === "NotAllowedError" || err.name === "AbortError")) {
           setNeedsGesture(true);
         }
       });

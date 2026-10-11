@@ -8,7 +8,9 @@ const DEFAULT_STUN_SERVERS = [
 ];
 
 function getIceServerConfig(options = {}) {
-  const { clientId = "together-peer", ttlSeconds = 86400 } = options;
+  const rawClient = String(options.clientId || "together-peer");
+  const clientId = rawClient.replace(/[^a-zA-Z0-9_-]/g, "").slice(0, 64) || "together-peer";
+  const ttlSeconds = Math.min(604800, Math.max(60, Number(options.ttlSeconds) || 86400));
 
   const stunUrlsEnv = process.env.STUN_URLS;
   const turnUrlsEnv = process.env.TURN_URLS;
@@ -17,14 +19,18 @@ function getIceServerConfig(options = {}) {
   const turnCredential = process.env.TURN_CREDENTIAL;
 
   const stunServers = stunUrlsEnv
-    ? stunUrlsEnv.split(",").map((u) => ({ urls: u.trim() })).filter((s) => s.urls)
+    ? stunUrlsEnv.split(",").map((u) => ({ urls: u.trim() })).filter((s) => s.urls && s.urls.startsWith("stun:"))
     : DEFAULT_STUN_SERVERS;
 
   const iceServers = [...stunServers];
   let hasTurn = false;
+  let turnType = "none";
 
   if (turnUrlsEnv) {
-    const urls = turnUrlsEnv.split(",").map((u) => u.trim()).filter(Boolean);
+    const urls = turnUrlsEnv
+      .split(",")
+      .map((u) => u.trim())
+      .filter((u) => u && (u.startsWith("turn:") || u.startsWith("turns:")));
 
     if (urls.length > 0) {
       if (turnSecret) {
@@ -41,6 +47,7 @@ function getIceServerConfig(options = {}) {
           credential
         });
         hasTurn = true;
+        turnType = "ephemeral-hmac";
       } else if (turnUsername && turnCredential) {
         // Static credentials
         iceServers.push({
@@ -49,10 +56,12 @@ function getIceServerConfig(options = {}) {
           credential: turnCredential
         });
         hasTurn = true;
+        turnType = "static-auth";
       } else {
         // TURN URLs without auth (e.g. internal dev mesh)
         iceServers.push({ urls });
         hasTurn = true;
+        turnType = "unauthenticated";
       }
     }
   }
@@ -60,6 +69,7 @@ function getIceServerConfig(options = {}) {
   return {
     iceServers,
     hasTurn,
+    turnType,
     ttl: ttlSeconds
   };
 }

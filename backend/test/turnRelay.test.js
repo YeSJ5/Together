@@ -66,8 +66,46 @@ test("Network Traversal: High-availability STUN fallback when TURN is unconfigur
   try {
     const config = getIceServerConfig({ clientId: "client-fallback" });
     assert.strictEqual(config.hasTurn, false);
+    assert.strictEqual(config.turnType, "none");
     assert.ok(config.iceServers.length >= 3, "Must provide redundant high-availability STUN servers");
     assert.ok(config.iceServers.some((s) => s.urls.includes("google.com")));
+  } finally {
+    process.env = originalEnv;
+  }
+});
+
+test("Network Traversal: Static credentials and input bounds validation", () => {
+  const originalEnv = { ...process.env };
+
+  try {
+    // 1. Static credentials support
+    process.env.TURN_URLS = "turn:relay.provider.com:3478";
+    process.env.TURN_USERNAME = "static-user";
+    process.env.TURN_CREDENTIAL = "static-password";
+    delete process.env.TURN_SECRET;
+
+    const staticConfig = getIceServerConfig();
+    assert.strictEqual(staticConfig.hasTurn, true);
+    assert.strictEqual(staticConfig.turnType, "static-auth");
+    const turnEntry = staticConfig.iceServers.find((s) => s.username === "static-user");
+    assert.ok(turnEntry);
+    assert.strictEqual(turnEntry.credential, "static-password");
+
+    // 2. Bound checks on negative or extreme TTL
+    delete process.env.TURN_USERNAME;
+    delete process.env.TURN_CREDENTIAL;
+    process.env.TURN_SECRET = "test-secret";
+
+    const clampedLow = getIceServerConfig({ ttlSeconds: -50 });
+    assert.strictEqual(clampedLow.ttl, 60, "Negative TTL must clamp to minimum 60s");
+
+    const clampedHigh = getIceServerConfig({ ttlSeconds: 99999999 });
+    assert.strictEqual(clampedHigh.ttl, 604800, "Extreme TTL must clamp to maximum 7 days (604800s)");
+
+    // 3. ClientId sanitization
+    const sanitized = getIceServerConfig({ clientId: "malicious!@#$$%^&*()_+`~client" });
+    const user = sanitized.iceServers.find((s) => s.username).username;
+    assert.ok(!user.includes("@#$$%^"), "Client ID must be sanitized to safe alphanumeric characters");
   } finally {
     process.env = originalEnv;
   }

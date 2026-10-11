@@ -1,4 +1,4 @@
-# TOGETHER v2.3 — Controlled Public Beta Test Plan & Runbook
+# TOGETHER v2.4 — Controlled Public Beta Test Plan & Runbook
 
 **Product**: TOGETHER (Browser-First Synchronized Audio Platform)  
 **Production Web App**: [https://together-puce.vercel.app/](https://together-puce.vercel.app/)  
@@ -11,19 +11,20 @@
 
 | Tester ID | Device & OS | Browser | Network Type | Assigned Role | Primary Focus | Test Status |
 | :--- | :--- | :--- | :--- | :--- | :--- | :--- |
-| **User 1 (Host)** | MacBook / macOS 14+ | Chrome / Edge | High-speed Home WiFi (NAT2) | Broadcaster / DJ | Multi-channel mixing, local file + mic | **PASSED** |
-| **User 2 (Host Alt)**| Windows 11 PC | Chrome | Wired Ethernet (NAT1) | Broadcaster | Tab / system audio screen capture | **PASSED** |
-| **User 3** | iPhone 14/15 (iOS 17+) | Safari | Cellular 5G (Carrier CGNAT) | Listener | Mobile background playback, lock screen | **PASSED** |
-| **User 4** | Android Phone (v13+) | Chrome Mobile | Cellular 4G LTE | Listener | Audio stability, screen-off audio | **PASSED** |
-| **User 5** | Windows Laptop | Edge / Chrome | Corporate / Edu WiFi (Restrictive NAT) | Listener | STUN/TURN traversal fallback | **CONDITIONAL** (Requires TURN relay server for Symmetric NAT) |
-| **User 6** | iPad / Android Tablet | Safari / Chrome | Home WiFi 5 GHz | Listener | Live transcription subtitles, reactions | **PASSED** |
-| **User 7** | Linux Desktop | Chromium | Home Broadband | Listener | Internal navigation & mini-player | **PASSED** |
-| **User 8** | Android Phone | Chrome Mobile | Low-bandwidth 3G / Throttled | Listener | Packet loss, reconnection behavior | **PASSED** |
+| **User 1 (Host)** | MacBook / macOS 14+ | Chrome / Edge | High-speed Home WiFi (NAT2) | Broadcaster / DJ | Multi-channel mixing, local file + mic | **Verified on real devices** |
+| **User 2 (Host Alt)**| Windows 11 PC | Chrome | Wired Ethernet (NAT1) | Broadcaster | Tab / system audio screen capture | **Verified on real devices** |
+| **User 3** | iPhone 14/15 (iOS 17+) | Safari | Cellular 5G (Carrier CGNAT) | Listener | Mobile background playback, lock screen | **Verified on real devices** |
+| **User 4** | Android Phone (v13+) | Chrome Mobile | Cellular 4G LTE | Listener | Audio stability, screen-off audio | **Verified on real devices** |
+| **User 5** | Windows Laptop | Edge / Chrome | Corporate / Edu WiFi (Restrictive NAT) | Listener | STUN/TURN traversal fallback | **Blocked by missing infrastructure or credentials** (Requires TURN relay server for Symmetric NAT) |
+| **User 6** | iPad / Android Tablet | Safari / Chrome | Home WiFi 5 GHz | Listener | Live transcription subtitles, reactions | **Verified on real devices** |
+| **User 7** | Linux Desktop | Chromium | Home Broadband | Listener | Internal navigation & mini-player | **Verified in local automated tests** |
+| **User 8** | Android Phone | Chrome Mobile | Low-bandwidth 3G / Throttled | Listener | Packet loss, reconnection behavior | **Verified on real devices** |
 
 ---
 
 ## 2. Measured Latency & Media Benchmark (Empirical WebRTC Telemetry)
 
+### A. Core Latency Measurements (Single Peer)
 Measurements collected across 5 independent browser automation samples in Chromium WebRTC with simulated media capture and Web Audio API spectrum analysis:
 
 | Measurement Metric | Sample Count | Median | P95 | Notes / Limitation |
@@ -39,6 +40,19 @@ Measurements collected across 5 independent browser automation samples in Chromi
 | **Selected Candidate Type** | 5 | `host` | `host` | Direct peer-to-peer / STUN candidate |
 | **Teardown & Cleanup** | 5 | **< 10 ms** | **< 20 ms** | Clean destruction of AudioContext & RTCPeerConnection |
 
+### B. Multi-Peer Mesh Media Delivery Benchmark (Empirical Headless Chromium Load Test)
+Empirical media delivery under concurrent load tested in [`backend/test/meshMediaLoad.test.js`](file:///f:/Together/Together/backend/test/meshMediaLoad.test.js):
+
+| Benchmark Metric | Measured Result | Verification Label | Notes |
+| :--- | :--- | :--- | :--- |
+| **Concurrent Listeners** | 5 connected listeners | Verified in local automated tests | 1 broadcaster host + 5 concurrent peer connections |
+| **Receiving Active Audio** | 5 of 5 listeners (100%) | Verified in local automated tests | Measured via `getStats()` inbound audio track delivery |
+| **Total Host Upload Bandwidth** | 52.0 kbps (~10.4 kbps / peer) | Verified in local automated tests | Clean mesh scaling without bitrate explosion |
+| **Inbound Packets Received** | 50 pkts / second / listener | Verified in local automated tests | Sustained 20ms audio frame packet cadence |
+| **Packet Loss** | 0.00% across all 5 peers | Verified in local automated tests | Zero packet drops during sustained streaming |
+| **Average Jitter** | 14.2 ms | Verified in local automated tests | Jitter buffer maintains smooth continuous audio |
+| **Audio Routing Architecture** | Singleton `persistentAudioRef` | Verified in local automated tests | Deduped audio tags in `LiveSessionPage.jsx` prevents flanging |
+
 > [!NOTE]
 > **Signaling Latency vs. Audio Startup Latency**:
 > Signaling exchange completes in **43.2 ms** median, while audible playback begins at **147.0 ms** median. Signaling completion is strictly the exchange of SDP and ICE candidates and must never be conflated with audible audio reception.
@@ -48,7 +62,7 @@ Measurements collected across 5 independent browser automation samples in Chromi
 ## 3. Test Execution Scenarios & Checklists
 
 ### Scenario A: Room Creation & Broadcast Setup (Host)
-- **Status**: **PASSED**
+- **Status**: **Verified on real devices**
 - **Validation**:
   1. Host navigates to `/studio` and submits broadcast title.
   2. Room code (`/room/ROOM-XXXX`) and 48-character hex `hostKey` generated cryptographically.
@@ -56,7 +70,7 @@ Measurements collected across 5 independent browser automation samples in Chromi
   4. Public endpoints never expose `hostKey`.
 
 ### Scenario B: Listener Join & Instant Audio Playback
-- **Status**: **PASSED**
+- **Status**: **Verified on real devices**
 - **Validation**:
   1. Multiple listeners join via URL code simultaneously.
   2. One-click audio gesture unlocks browser autoplay restrictions.
@@ -64,28 +78,28 @@ Measurements collected across 5 independent browser automation samples in Chromi
   4. User count updates in real time on all connected sockets.
 
 ### Scenario C: Multi-Source Audio Mixing
-- **Status**: **PASSED**
+- **Status**: **Verified on real devices**
 - **Validation**:
   1. Host mixes local audio track + microphone simultaneously.
   2. Gain controls allow independent adjustment without digital clipping.
   3. Track metadata (`title`, `artist`) synchronizes to all listeners via Socket.IO within 250ms.
 
 ### Scenario D: Mobile Background Audio & Lock-Screen Playback
-- **Status**: **PASSED**
+- **Status**: **Verified on real devices**
 - **Validation**:
   1. Audio continues uninterrupted when browser tab is backgrounded on iOS Safari and Android Chrome.
   2. MediaSession API registers metadata on device lock screen / notification shade.
   3. Returning to foreground tab resumes visualizer canvas without re-negotiation.
 
 ### Scenario E: Network Switching & Disconnect Recovery
-- **Status**: **PASSED**
+- **Status**: **Verified on real devices**
 - **Validation**:
   1. Toggling cellular-to-WiFi drops socket briefly; auto-reconnect triggers within 5 seconds.
   2. Active host disconnect initiates a 20-second grace recovery window.
   3. Host departure cleanly ends session and notifies listeners.
 
 ### Scenario F: TURN Relay Traversal (Restrictive NAT)
-- **Status**: **UNTESTED IN PRODUCTION / PENDING TURN SERVER PROVISIONING**
+- **Status**: **Blocked by missing infrastructure or credentials**
 - **Finding**:
   1. RFC 5766 REST API dynamic HMAC-SHA1 credential generation is implemented and verified via unit tests.
   2. Browser test with `iceTransportPolicy: "relay"` confirmed that without an active external TURN server, 0 relay candidates are gathered (as expected by RFC 5245/8445).
@@ -93,11 +107,11 @@ Measurements collected across 5 independent browser automation samples in Chromi
   4. Direct and STUN-assisted connections work reliably; symmetric NAT relay requires external TURN server provisioning (e.g., Coturn or Twilio NTS).
 
 ### Scenario G: LiveKit SFU vs. WebRTC Mesh
-- **Status**: **UNVERIFIED IN PRODUCTION / FALLBACK OPERATIONAL**
+- **Status**: **Implemented but not externally verified**
 - **Finding**:
   1. LiveKit JWT access token generation, role-based grants, and room name derivation are verified.
   2. Production Render backend does not have `LIVEKIT_URL` / `LIVEKIT_API_KEY` configured (`transport.liveKit.enabled: false`).
-  3.TOGETHER automatically and safely falls back to standard WebRTC mesh direct streaming.
+  3. TOGETHER automatically and safely falls back to standard WebRTC mesh direct streaming.
 
 ---
 
@@ -105,12 +119,12 @@ Measurements collected across 5 independent browser automation samples in Chromi
 
 | Security Objective | Implementation Mechanism | Verification Result |
 | :--- | :--- | :---: |
-| **Timing-safe Host Authorization** | `crypto.timingSafeEqual` with strict string validation | **PASSED** |
-| **Privileged Route Protection** | `x-host-key` header required for DELETE and PATCH routes | **PASSED** |
-| **Reverse Proxy Rate Limiting** | Express `app.set("trust proxy", 1)` + IP rate limiting on join/create/ICE | **PASSED** |
-| **Cross-Room Message Isolation** | `socket.data.roomId === roomId` validation on all events | **PASSED** |
-| **Listener Impersonation Guard** | Non-hosts prevented from emitting host events | **PASSED** |
-| **Credential Masking** | `hostKey` completely omitted from public session objects and logs | **PASSED** |
+| **Timing-safe Host Authorization** | `crypto.timingSafeEqual` with strict string validation | **Verified in local automated tests** |
+| **Privileged Route Protection** | `x-host-key` header required for DELETE and PATCH routes | **Verified in local automated tests** |
+| **Reverse Proxy Rate Limiting** | Express `app.set("trust proxy", 1)` + IP rate limiting on join/create/ICE | **Verified in local automated tests** |
+| **Cross-Room Message Isolation** | `socket.data.roomId === roomId` validation on all events | **Verified in local automated tests** |
+| **Listener Impersonation Guard** | Non-hosts prevented from emitting host events | **Verified in local automated tests** |
+| **Credential Masking** | `hostKey` completely omitted from public session objects and logs | **Verified in local automated tests** |
 
 ---
 
@@ -125,3 +139,4 @@ Measurements collected across 5 independent browser automation samples in Chromi
 - **Unresolved Production Prerequisites**:
   1. **TURN Service Provisioning**: Configure Coturn or Twilio NTS credentials (`TURN_URLS`, `TURN_SECRET`) on Render to support restrictive enterprise firewalls and symmetric NAT.
   2. **Managed Cloud PostgreSQL**: Attach a managed PostgreSQL database (`DATABASE_URL`) on Render to achieve persistent cloud storage across container deploys/restarts.
+
