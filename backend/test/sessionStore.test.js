@@ -124,4 +124,50 @@ test("database: TogetherDatabase health reporting, storage type detection, and g
   assert.strictEqual(degradedHealth.status, "degraded");
 });
 
+test("sessionStore: historical restored rooms do not appear as active broadcasts until host reconnects", async () => {
+  const {
+    createSession,
+    getSession,
+    setHostConnected,
+    listActivePublicSessions,
+    listActivePublicSessionsAsync,
+    clearAllSessionsForTesting,
+    deleteSession
+  } = require("../src/sessionStore");
+
+  const session = createSession({
+    hostId: "host-historical-1",
+    hostName: "Historical DJ",
+    title: "Old Broadcast",
+    category: "Music",
+    isPublic: true
+  });
+  const roomId = session.roomId;
+
+  // Simulate server restart: clear memory
+  clearAllSessionsForTesting();
+
+  // Initially after restart, restored from DB, host is not connected:
+  const restored = getSession(roomId);
+  assert.ok(restored, "Room metadata is preserved in database");
+
+  // Both sync and async public lists must NOT advertise it as an active broadcast
+  const syncList = listActivePublicSessions();
+  assert.strictEqual(syncList.some((r) => r.roomId === roomId), false, "Historical restored room must NOT be advertised in sync list without active host");
+
+  const asyncList = await listActivePublicSessionsAsync();
+  assert.strictEqual(asyncList.some((r) => r.roomId === roomId), false, "Historical restored room must NOT be advertised in async list without active host");
+
+  // Host connects / presence restored:
+  setHostConnected(roomId, true);
+
+  const activeSync = listActivePublicSessions();
+  assert.strictEqual(activeSync.some((r) => r.roomId === roomId), true, "Room appears in sync list once host connects");
+
+  const activeAsync = await listActivePublicSessionsAsync();
+  assert.strictEqual(activeAsync.some((r) => r.roomId === roomId), true, "Room appears in async list once host connects");
+
+  deleteSession(roomId);
+});
+
 

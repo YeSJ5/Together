@@ -423,14 +423,14 @@ PORT=5000
 CLIENT_ORIGIN=https://your-frontend.vercel.app
 ```
 
-## Current Product Highlights (v2.5)
+## Current Product Highlights (v2.6)
 
 - **Browser-First Background Playback**: Persistent floating mini-player preserving audio state across all internal route navigation.
 - **Audio Playback Path Deduping**: Unified singleton audio node (`persistentAudioRef` in `AudioRoomContext`) eliminating duplicate playback tags, audio flanging, and phantom autoplay issues. Manual play, volume, mute, resume, and teardown route exclusively through the singleton ref.
-- **Production Persistence Durability & Multi-Instance Resilience**: Dual-engine persistence layer supporting SQLite for local development and managed PostgreSQL for cloud durability. Protected against dirty cache writes via optimistic rollback on query failure, periodic background reconciliation (every 15s), and authoritative async queries (`getRoomAsync`, `listPublicActiveRoomsAsync`). Accurate HTTP 503 readiness failure on database disruption.
+- **Production Persistence Durability & Presence Reconstruction**: Dual-engine persistence layer supporting SQLite for local development and managed PostgreSQL for cloud durability. Protected against dirty cache writes via optimistic rollback on query failure, periodic background reconciliation (every 15s), and authoritative async queries (`getRoomAsync`, `listPublicActiveRoomsAsync`). Restored historical sessions are strictly excluded from public listings until the host actively connects. Accurate HTTP 503 readiness failure on database disruption.
 - **WebRTC Mesh Media Load Verification**: Empirically measured in headless Chromium across progressive listener tiers:
-  - **Tier 1 (5 Listeners)**: 5 of 5 receiving audio (100%), 0 packet loss, 182 kbps host upload (~36.4 kbps/peer), 5.2ms average jitter.
-  - **Tier 2 (8 Listeners)**: 8 of 8 receiving audio (100%), 0 packet loss, 298 kbps host upload (~37.3 kbps/peer), 7.0ms average jitter.
+  - **Tier 1 (5 Listeners)**: 5 of 5 receiving audio (100%), 0 packet loss, 194 kbps host upload (~38.8 kbps/peer), 5.0ms average jitter.
+  - **Tier 2 (8 Listeners)**: 8 of 8 receiving audio (100%), 0 packet loss, 232 kbps host upload (~29.0 kbps/peer), 4.38ms average jitter.
 - **Hardened TURN Traversal**: Parameter-sanitized ICE configuration supporting dynamic HMAC-SHA1 credentials and static auth with strict parameter validation and safe diagnostics. Frontend caches ICE credentials bounded by server TTL (`data.ttl`).
 - **Live Public Stages Discovery**: Explore active broadcasts filtered by category (Music, Study, Lecture, Podcast, DJ).
 - **Live Speech-to-Text Transcripts & Subtitles**: Browser speech engine transcription broadcasting real-time captions for lectures and accessibility.

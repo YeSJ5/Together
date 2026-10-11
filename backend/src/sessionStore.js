@@ -215,12 +215,22 @@ async function listActivePublicSessionsAsync() {
   if (db.isPg) {
     try {
       const persistedRooms = await db.listPublicActiveRoomsAsync();
+      const now = Date.now();
       const mergedMap = new Map();
-      for (const room of persistedRooms) {
-        mergedMap.set(room.roomId, sanitizeSession(room));
-      }
       for (const local of localLive) {
         mergedMap.set(local.roomId, local);
+      }
+      for (const room of persistedRooms) {
+        const local = sessions.get(room.roomId);
+        // Only advertise if host is actively connected or sibling instance heartbeat is fresh (< 30s)
+        const isLive = local
+          ? (local.hostConnected === true || (!local.restoredFromDb && now - local.createdAt < 60000))
+          : (now - (room.updatedAt || room.createdAt || 0) < 30000);
+        if (isLive && room.status === "active" && room.isPublic !== false) {
+          if (!mergedMap.has(room.roomId)) {
+            mergedMap.set(room.roomId, sanitizeSession(room));
+          }
+        }
       }
       return Array.from(mergedMap.values()).sort((a, b) => {
         const diff = (b.users?.length || 0) - (a.users?.length || 0);

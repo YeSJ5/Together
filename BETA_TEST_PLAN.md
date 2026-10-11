@@ -1,4 +1,4 @@
-# TOGETHER v2.5 — Controlled Public Beta Test Plan & Runbook
+# TOGETHER v2.6 — Controlled Public Beta Test Plan & Runbook
 
 **Product**: TOGETHER (Browser-First Synchronized Audio Platform)  
 **Production Web App**: [https://together-puce.vercel.app/](https://together-puce.vercel.app/)  
@@ -29,14 +29,14 @@ Measurements collected across 5 independent browser automation samples in Chromi
 
 | Measurement Metric | Sample Count | Median | P95 | Notes / Limitation |
 | :--- | :---: | :---: | :---: | :--- |
-| **Room Creation Duration** | 5 | **644.2 ms** | **2,012.7 ms** | HTTP POST `/create-session` (DB journal write) |
-| **Room Join Duration** | 5 | **5.5 ms** | **41.8 ms** | HTTP POST `/session/:id/join` |
-| **Signaling Handshake** | 5 | **86.1 ms** | **182.4 ms** | WebRTC offer/answer/ICE exchange completion |
-| **Time to 1st Audio Packet** | 5 | **193.5 ms** | **359.8 ms** | First inbound RTP packet received (`inbound-rtp`) |
-| **Time to Audible Playback** | 5 | **217.7 ms** | **330.5 ms** | First non-zero energy detected by `AudioContext` |
+| **Room Creation Duration** | 5 | **428.3 ms** | **1,360.9 ms** | HTTP POST `/create-session` (DB journal write) |
+| **Room Join Duration** | 5 | **5.2 ms** | **6.8 ms** | HTTP POST `/session/:id/join` |
+| **Signaling Handshake** | 5 | **60.6 ms** | **358.9 ms** | WebRTC offer/answer/ICE exchange completion |
+| **Time to 1st Audio Packet** | 5 | **189.5 ms** | **996.2 ms** | First inbound RTP packet received (`inbound-rtp`) |
+| **Time to Audible Playback** | 5 | **284.2 ms** | **1,227.6 ms** | First non-zero energy detected by `AudioContext` |
 | **Inbound RTP Packets/sec** | 5 | **57 pkts/s** | **65 pkts/s** | Standard Opus audio packetization (20ms frames) |
 | **Packet Loss** | 5 | **0%** | **0%** | Zero loss over local and STUN direct candidate pairs |
-| **Jitter** | 5 | **4.00 ms** | **6.00 ms** | WebRTC jitter buffer delay |
+| **Jitter** | 5 | **4.00 ms** | **4.00 ms** | WebRTC jitter buffer delay |
 | **Selected Candidate Type** | 5 | `host` | `host` | Direct peer-to-peer / STUN candidate |
 | **Teardown & Cleanup** | 5 | **< 10 ms** | **< 20 ms** | Clean destruction of AudioContext & RTCPeerConnection |
 
