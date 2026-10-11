@@ -21,7 +21,7 @@ fi
 # Detect External Public IP
 EXTERNAL_IP="${2:-}"
 if [[ -z "$EXTERNAL_IP" || "$EXTERNAL_IP" == "--rotate-secret" ]]; then
-    EXTERNAL_IP=$(curl -s https://api.ipify.org || curl -s https://ifconfig.me || hostname -I | awk '{print $1}')
+    EXTERNAL_IP=$(curl -s -f --max-time 3 https://api.ipify.org || curl -s -f --max-time 3 https://ifconfig.me || hostname -I | awk '{print $1}')
 fi
 
 # Detect Local Interface IP (for 1:1 NAT in AWS EC2, GCP, Oracle Cloud)
@@ -73,7 +73,8 @@ CERT_PATH="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
 KEY_PATH="/etc/letsencrypt/live/${DOMAIN}/privkey.pem"
 if [[ -f "$CERT_PATH" && -f "$KEY_PATH" ]]; then
     echo "[INFO] Detected valid Let's Encrypt certificates for ${DOMAIN}. Enabling TURNS TLS."
-    chmod -R 755 /etc/letsencrypt/archive /etc/letsencrypt/live || true
+    chmod 755 /etc/letsencrypt || true
+    chmod -R a+rX /etc/letsencrypt/archive /etc/letsencrypt/live || true
     TLS_CONFIG="cert=${CERT_PATH}
 pkey=${KEY_PATH}"
 fi
