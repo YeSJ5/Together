@@ -1,4 +1,4 @@
-# TOGETHER v2.7 — Controlled Public Beta Test Plan & Runbook
+# TOGETHER v2.8 — Controlled Public Beta Test Plan & Runbook
 
 **Product**: TOGETHER (Browser-First Synchronized Audio Platform)  
 **Production Web App**: [https://together-puce.vercel.app/](https://together-puce.vercel.app/)  

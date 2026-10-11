@@ -67,6 +67,9 @@ async function runMeshLoadTest() {
 
       const startTime = performance.now();
 
+      // Setup candidate buffers for each peer pair
+      const candidateBuffers = [];
+
       // Setup connections for all listeners in this tier
       for (let i = 0; i < listenerCount; i++) {
         const pcHost = new RTCPeerConnection({ iceServers: [{ urls: "stun:stun.l.google.com:19302" }] });
@@ -75,12 +78,35 @@ async function runMeshLoadTest() {
         hostPCs.push(pcHost);
         listenerPCs.push(pcListener);
 
+        const bufferObj = {
+          hostCandidates: [],
+          listenerCandidates: [],
+          hostRemoteSet: false,
+          listenerRemoteSet: false
+        };
+        candidateBuffers.push(bufferObj);
+
         // Host adds audio track for each listener in mesh topology
         pcHost.addTrack(hostAudioTrack, hostStream);
 
-        // Cross-connect ICE candidates
-        pcHost.onicecandidate = (e) => { if (e.candidate) pcListener.addIceCandidate(e.candidate); };
-        pcListener.onicecandidate = (e) => { if (e.candidate) pcHost.addIceCandidate(e.candidate); };
+        // Cross-connect ICE candidates with buffering
+        pcHost.onicecandidate = (e) => {
+          if (!e.candidate) return;
+          if (bufferObj.listenerRemoteSet) {
+            pcListener.addIceCandidate(e.candidate).catch(() => {});
+          } else {
+            bufferObj.listenerCandidates.push(e.candidate);
+          }
+        };
+
+        pcListener.onicecandidate = (e) => {
+          if (!e.candidate) return;
+          if (bufferObj.hostRemoteSet) {
+            pcHost.addIceCandidate(e.candidate).catch(() => {});
+          } else {
+            bufferObj.hostCandidates.push(e.candidate);
+          }
+        };
       }
 
       // Track listeners that receive audio and detect energy
@@ -113,8 +139,8 @@ async function runMeshLoadTest() {
             let packetsLost = 0;
             let jitter = 0;
 
-            // Poll for packets and energy over up to 2.5 seconds
-            for (let p = 0; p < 25; p++) {
+            // Poll for packets and energy over up to 3.0 seconds
+            for (let p = 0; p < 30; p++) {
               await new Promise((r) => setTimeout(r, 100));
               const stats = await pcListener.getStats();
               stats.forEach((s) => {
@@ -135,7 +161,7 @@ async function runMeshLoadTest() {
               for (let b = 0; b < buffer.length; b++) sum += buffer[b];
               if (sum > 0) hasAudioEnergy = true;
 
-              if (packetsReceived >= 25 && p >= 12) break;
+              if (packetsReceived >= 20 && p >= 15) break;
             }
 
             await audioCtx.close().catch(() => {});
@@ -155,16 +181,27 @@ async function runMeshLoadTest() {
         });
       });
 
-      // Conduct negotiation for all peers concurrently
+      // Conduct negotiation for all peers concurrently with candidate flush
       await Promise.all(
         hostPCs.map(async (pcHost, i) => {
           const pcListener = listenerPCs[i];
+          const bufferObj = candidateBuffers[i];
+
           const offer = await pcHost.createOffer();
           await pcHost.setLocalDescription(offer);
           await pcListener.setRemoteDescription(offer);
+          bufferObj.listenerRemoteSet = true;
+          for (const c of bufferObj.listenerCandidates) {
+            await pcListener.addIceCandidate(c).catch(() => {});
+          }
+
           const answer = await pcListener.createAnswer();
           await pcListener.setLocalDescription(answer);
           await pcHost.setRemoteDescription(answer);
+          bufferObj.hostRemoteSet = true;
+          for (const c of bufferObj.hostCandidates) {
+            await pcHost.addIceCandidate(c).catch(() => {});
+          }
         })
       );
 

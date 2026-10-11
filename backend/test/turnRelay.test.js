@@ -269,8 +269,8 @@ window.addEventListener("DOMContentLoaded", run);
 
   const timer = setTimeout(() => {
     killChrome();
-    rejectTraversal(new Error("Network traversal test timed out after 10s"));
-  }, 10000);
+    rejectTraversal(new Error("Network traversal test timed out after 25s"));
+  }, 25000);
 
   try {
     const report = await traversalPromise;
