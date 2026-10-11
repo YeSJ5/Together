@@ -1,0 +1,70 @@
+const crypto = require("crypto");
+
+const DEFAULT_STUN_SERVERS = [
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun1.l.google.com:19302" },
+  { urls: "stun:stun2.l.google.com:19302" },
+  { urls: "stun:global.stun.twilio.com:3478" }
+];
+
+function getIceServerConfig(options = {}) {
+  const { clientId = "together-peer", ttlSeconds = 86400 } = options;
+
+  const stunUrlsEnv = process.env.STUN_URLS;
+  const turnUrlsEnv = process.env.TURN_URLS;
+  const turnSecret = process.env.TURN_SECRET;
+  const turnUsername = process.env.TURN_USERNAME;
+  const turnCredential = process.env.TURN_CREDENTIAL;
+
+  const stunServers = stunUrlsEnv
+    ? stunUrlsEnv.split(",").map((u) => ({ urls: u.trim() })).filter((s) => s.urls)
+    : DEFAULT_STUN_SERVERS;
+
+  const iceServers = [...stunServers];
+  let hasTurn = false;
+
+  if (turnUrlsEnv) {
+    const urls = turnUrlsEnv.split(",").map((u) => u.trim()).filter(Boolean);
+
+    if (urls.length > 0) {
+      if (turnSecret) {
+        // RFC 5766 REST API ephemeral credential generation using HMAC-SHA1
+        const expiry = Math.floor(Date.now() / 1000) + ttlSeconds;
+        const username = `${expiry}:${clientId}`;
+        const hmac = crypto.createHmac("sha1", turnSecret);
+        hmac.update(username);
+        const credential = hmac.digest("base64");
+
+        iceServers.push({
+          urls,
+          username,
+          credential
+        });
+        hasTurn = true;
+      } else if (turnUsername && turnCredential) {
+        // Static credentials
+        iceServers.push({
+          urls,
+          username: turnUsername,
+          credential: turnCredential
+        });
+        hasTurn = true;
+      } else {
+        // TURN URLs without auth (e.g. internal dev mesh)
+        iceServers.push({ urls });
+        hasTurn = true;
+      }
+    }
+  }
+
+  return {
+    iceServers,
+    hasTurn,
+    ttl: ttlSeconds
+  };
+}
+
+module.exports = {
+  getIceServerConfig,
+  DEFAULT_STUN_SERVERS
+};

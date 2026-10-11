@@ -1,4 +1,36 @@
+const { getDatabase } = require("./db/database");
+
 const sessions = new Map();
+const db = getDatabase();
+
+// Restore recent active rooms from durable database into memory
+try {
+  const persistedRooms = db.listPublicActiveRooms();
+  for (const room of persistedRooms) {
+    if (!sessions.has(room.roomId)) {
+      sessions.set(room.roomId, {
+        roomId: room.roomId,
+        title: room.title,
+        category: room.category,
+        isPublic: room.isPublic,
+        hostId: room.hostId,
+        hostName: room.hostName,
+        users: [], // Presence is transient and re-established via WebRTC / socket connections
+        createdAt: room.createdAt,
+        status: room.status,
+        audioSourceMode: room.audioSourceMode,
+        mediaBackend: room.mediaBackend,
+        nativeMobileRecommended: room.nativeMobileRecommended,
+        liveKitRoomName: room.liveKitRoomName,
+        currentTrack: room.currentTrack,
+        events: [],
+        nextEventId: 1
+      });
+    }
+  }
+} catch (e) {
+  console.warn("[sessionStore] Could not hydrate sessions from database:", e.message);
+}
 
 function createRoomId() {
   const alphabet = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -14,7 +46,7 @@ function createRoomId() {
 function generateUniqueRoomId() {
   let roomId = createRoomId();
 
-  while (sessions.has(roomId)) {
+  while (sessions.has(roomId) || (db && db.getRoom(roomId))) {
     roomId = createRoomId();
   }
 
@@ -33,7 +65,7 @@ function sanitizeSession(session) {
     isPublic: session.isPublic !== false,
     hostId: session.hostId,
     hostName: session.hostName,
-    users: session.users,
+    users: session.users || [],
     createdAt: session.createdAt,
     status: session.status,
     audioSourceMode: session.audioSourceMode,
@@ -76,6 +108,18 @@ function createSession({
   };
 
   sessions.set(roomId, session);
+
+  try {
+    db.upsertRoom(session);
+    db.upsertUserProfile(hostId, hostName, "host");
+    db.appendRoomEvent(roomId, "room-created", hostId, null, {
+      title: session.title,
+      category: session.category
+    });
+  } catch (err) {
+    console.error("[sessionStore] Database error during createSession:", err.message);
+  }
+
   return sanitizeSession(session);
 }
 
@@ -94,15 +138,47 @@ function listActivePublicSessions() {
 }
 
 function getSession(roomId) {
-  return sanitizeSession(sessions.get(roomId));
+  const inMemory = sessions.get(roomId);
+  if (inMemory) {
+    return sanitizeSession(inMemory);
+  }
+
+  // Fallback to durable storage
+  const persisted = db.getRoom(roomId);
+  if (persisted && persisted.status === "active") {
+    // Restore to inMemory map
+    const restored = {
+      ...persisted,
+      users: [],
+      events: [],
+      nextEventId: 1
+    };
+    sessions.set(roomId, restored);
+    return sanitizeSession(restored);
+  }
+
+  return null;
 }
 
 function getRawSession(roomId) {
-  return sessions.get(roomId);
+  let session = sessions.get(roomId);
+  if (!session) {
+    const persisted = db.getRoom(roomId);
+    if (persisted && persisted.status === "active") {
+      session = {
+        ...persisted,
+        users: [],
+        events: [],
+        nextEventId: 1
+      };
+      sessions.set(roomId, session);
+    }
+  }
+  return session;
 }
 
 function updateSession(roomId, updater) {
-  const current = sessions.get(roomId);
+  const current = getRawSession(roomId);
 
   if (!current) {
     return null;
@@ -110,6 +186,13 @@ function updateSession(roomId, updater) {
 
   updater(current);
   sessions.set(roomId, current);
+
+  try {
+    db.upsertRoom(current);
+  } catch (err) {
+    console.error("[sessionStore] Database error during updateSession:", err.message);
+  }
+
   return sanitizeSession(current);
 }
 
@@ -117,11 +200,30 @@ function deleteSession(roomId) {
   const session = sessions.get(roomId);
 
   if (!session) {
+    const persisted = db.getRoom(roomId);
+    if (persisted) {
+      db.deleteOrEndRoom(roomId);
+      return sanitizeSession(persisted);
+    }
     return null;
   }
 
   sessions.delete(roomId);
+
+  try {
+    db.deleteOrEndRoom(roomId);
+    db.appendRoomEvent(roomId, "room-ended", session.hostId, null, {
+      durationMs: Date.now() - session.createdAt
+    });
+  } catch (err) {
+    console.error("[sessionStore] Database error during deleteSession:", err.message);
+  }
+
   return sanitizeSession(session);
+}
+
+function clearAllSessionsForTesting() {
+  sessions.clear();
 }
 
 module.exports = {
@@ -130,5 +232,7 @@ module.exports = {
   getRawSession,
   getSession,
   listActivePublicSessions,
-  updateSession
+  updateSession,
+  clearAllSessionsForTesting,
+  getDatabase: () => db
 };

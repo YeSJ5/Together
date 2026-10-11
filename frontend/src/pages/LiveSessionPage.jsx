@@ -7,7 +7,7 @@ import { createAppId } from "../lib/ids";
 import { normalizeRoomId } from "../lib/sanitize";
 import { createSocket } from "../lib/socket";
 import { getListenerSession } from "../lib/storage";
-import { createPeerConnection } from "../lib/webrtc";
+import { createPeerConnection, getDynamicIceServers } from "../lib/webrtc";
 import {
   disableNativeBackgroundPlayback,
   enableNativeBackgroundPlayback,
@@ -68,6 +68,9 @@ export default function LiveSessionPage() {
 
   useEffect(() => {
     let isCancelled = false;
+
+    // Dynamically resolve ICE servers (STUN + TURN) ahead of time
+    getDynamicIceServers().catch(() => {});
 
     // Verify session initially
     fetchSession(normalizedRoomId)

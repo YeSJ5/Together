@@ -49,3 +49,37 @@ test("sessionStore: creates, lists, updates, and deletes sessions", () => {
   assert.strictEqual(deleted.roomId, session.roomId);
   assert.strictEqual(getSession(session.roomId), null);
 });
+
+test("sessionStore: restores room from durable database on process reload", () => {
+  const session = createSession({
+    hostId: "host-persist-1",
+    hostName: "Resilient DJ",
+    title: "Persistent Broadcast",
+    category: "Podcast",
+    isPublic: true
+  });
+
+  const roomId = session.roomId;
+  assert.ok(roomId);
+
+  // Simulate process restart by clearing in-memory Map
+  const { clearAllSessionsForTesting, getDatabase } = require("../src/sessionStore");
+  clearAllSessionsForTesting();
+
+  // getSession should restore from durable SQLite storage
+  const restored = getSession(roomId);
+  assert.ok(restored, "Session should be restored from durable database");
+  assert.strictEqual(restored.roomId, roomId);
+  assert.strictEqual(restored.title, "Persistent Broadcast");
+  assert.strictEqual(restored.hostName, "Resilient DJ");
+  assert.strictEqual(restored.status, "active");
+
+  // Check user profile was saved
+  const db = getDatabase();
+  const profile = db.getUserProfile("host-persist-1");
+  assert.ok(profile);
+  assert.strictEqual(profile.username, "Resilient DJ");
+
+  deleteSession(roomId);
+});
+

@@ -7,7 +7,7 @@ import { createSession, endSession, updateSessionTrack } from "../lib/api";
 import { createAppId } from "../lib/ids";
 import { sanitizeDisplayName } from "../lib/sanitize";
 import { createSocket } from "../lib/socket";
-import { createPeerConnection } from "../lib/webrtc";
+import { createPeerConnection, getDynamicIceServers } from "../lib/webrtc";
 import { createSpeechRecognizer, isSpeechRecognitionSupported } from "../lib/speechRecognition";
 import {
   disableNativeBackgroundPlayback,
@@ -133,16 +133,7 @@ export default function HostDashboardPage() {
     analyser.smoothingTimeConstant = 0.6;
     analyserRef.current = analyser;
 
-    // Continuous inaudible sub-carrier oscillator to keep WebRTC RTP connection active in background/silence
-    try {
-      const carrier = ctx.createOscillator();
-      const carrierGain = ctx.createGain();
-      carrier.frequency.setValueAtTime(15, ctx.currentTime);
-      carrierGain.gain.setValueAtTime(0.00001, ctx.currentTime);
-      carrier.connect(carrierGain);
-      carrierGain.connect(destination);
-      carrier.start();
-    } catch (_cErr) {}
+    // Standard Opus discontinuous transmission (DTX) handles silence without artificial carrier oscillators
 
     // Microphone Gain Channel (DEFAULT 0.0 - MUTED)
     const micGain = ctx.createGain();
@@ -485,12 +476,6 @@ export default function HostDashboardPage() {
           });
           navigator.mediaSession.playbackState = "playing";
         }
-
-        if ("wakeLock" in navigator) {
-          navigator.wakeLock.request("screen").then((wl) => {
-            wakeLockRef.current = wl;
-          }).catch(() => {});
-        }
       } catch (_bgErr) {}
 
       if (isNativeAndroidApp()) {
@@ -683,6 +668,10 @@ export default function HostDashboardPage() {
     };
   }, []);
 
+  useEffect(() => {
+    getDynamicIceServers().catch(() => {});
+  }, []);
+
   const autostart = searchParams.get("autostart") === "1";
   const hasAutoStartedRef = useRef(false);
 
@@ -697,11 +686,6 @@ export default function HostDashboardPage() {
     const handleVisibilityOrFocus = () => {
       if (audioContextRef.current && audioContextRef.current.state === "suspended") {
         audioContextRef.current.resume().catch(() => {});
-      }
-      if (session && "wakeLock" in navigator && !wakeLockRef.current) {
-        navigator.wakeLock.request("screen").then((wl) => {
-          wakeLockRef.current = wl;
-        }).catch(() => {});
       }
       if (bgAudioRef.current && bgAudioRef.current.paused) {
         bgAudioRef.current.play().catch(() => {});

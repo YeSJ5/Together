@@ -6,10 +6,14 @@ const path = require("path");
 const cors = require("cors");
 const { Server } = require("socket.io");
 const { ALLOWED_ORIGINS, PORT } = require("./config");
+const crypto = require("crypto");
+const logger = require("./logger");
+const { getIceServerConfig } = require("./iceConfig");
 const { createLiveKitToken, getLiveKitConfig, getLiveKitRoomName } = require("./livekit");
 const {
   createSession,
   deleteSession,
+  getDatabase,
   getRawSession,
   getSession,
   listActivePublicSessions,
@@ -59,6 +63,21 @@ app.use(
 );
 app.use(express.json());
 app.use((request, response, next) => {
+  const reqId = request.headers["x-request-id"] || crypto.randomUUID().slice(0, 8);
+  request.reqId = reqId;
+  const start = Date.now();
+
+  response.on("finish", () => {
+    if (request.path !== "/api/health") {
+      logger.info(`${request.method} ${request.originalUrl} [${response.statusCode}] ${Date.now() - start}ms`, {
+        reqId,
+        method: request.method,
+        path: request.originalUrl,
+        statusCode: response.statusCode
+      });
+    }
+  });
+
   if (
     request.path.startsWith("/api") ||
     request.path.startsWith("/session") ||
@@ -76,15 +95,51 @@ app.use((request, response, next) => {
 app.get("/api", (_request, response) => {
   response.json({
     product: "TOGETHER",
+    version: "2.1.0",
     status: "running"
   });
 });
 
 app.get("/api/health", (_request, response) => {
-  response.json({
-    product: "TOGETHER",
-    status: "ok"
-  });
+  try {
+    const db = getDatabase();
+    const dbRooms = db.listPublicActiveRooms();
+    const mem = process.memoryUsage();
+    const ice = getIceServerConfig();
+
+    return response.json({
+      product: "TOGETHER",
+      version: "2.1.0",
+      status: "ok",
+      ready: true,
+      uptimeSeconds: Math.floor(process.uptime()),
+      database: {
+        status: "connected",
+        persistedActiveRooms: dbRooms.length
+      },
+      metrics: {
+        activeRooms: listActivePublicSessions().length,
+        connectedSockets: io.engine ? io.engine.clientsCount : 0,
+        memoryRssMb: Math.round(mem.rss / 1024 / 1024),
+        heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024)
+      },
+      turnConfigured: ice.hasTurn
+    });
+  } catch (error) {
+    logger.error("Health check error", { error: error.message });
+    return response.status(503).json({
+      product: "TOGETHER",
+      status: "degraded",
+      ready: false,
+      error: error.message
+    });
+  }
+});
+
+app.get("/api/ice-servers", (request, response) => {
+  const clientId = request.query.clientId || "client";
+  const ice = getIceServerConfig({ clientId });
+  response.json(ice);
 });
 
 app.get("/api/realtime-config", (_request, response) => {
@@ -719,12 +774,22 @@ io.on("connection", (socket) => {
   });
 });
 
+// Periodic cleanup of abandoned/stale rooms (runs every 30 minutes)
+setInterval(() => {
+  try {
+    const db = getDatabase();
+    db.cleanupStaleRooms();
+  } catch (err) {
+    logger.warn("Periodic room cleanup error", { error: err.message });
+  }
+}, 30 * 60 * 1000).unref();
+
 server.listen(PORT, "0.0.0.0", () => {
   const localIp = getLocalIpv4Address();
-  console.log(`TOGETHER backend listening on port ${PORT}`);
-  console.log(`Local app: http://localhost:${PORT}`);
-
-  if (localIp) {
-    console.log(`LAN app: http://${localIp}:${PORT}`);
-  }
+  logger.info(`TOGETHER backend listening on port ${PORT}`, {
+    port: PORT,
+    localUrl: `http://localhost:${PORT}`,
+    lanUrl: localIp ? `http://${localIp}:${PORT}` : null
+  });
 });
+

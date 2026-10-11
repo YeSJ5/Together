@@ -1,13 +1,57 @@
-const rtcConfig = {
-  iceServers: [
-    { urls: "stun:stun.l.google.com:19302" },
-    { urls: "stun:stun1.l.google.com:19302" },
-    { urls: "stun:stun2.l.google.com:19302" }
-  ]
-};
+import { API_BASE_URL } from "../config";
 
-export function createPeerConnection({ onIceCandidate, onTrack }) {
-  const peerConnection = new RTCPeerConnection(rtcConfig);
+export const DEFAULT_ICE_SERVERS = [
+  { urls: "stun:stun.l.google.com:19302" },
+  { urls: "stun:stun1.l.google.com:19302" },
+  { urls: "stun:stun2.l.google.com:19302" },
+  { urls: "stun:global.stun.twilio.com:3478" }
+];
+
+let cachedIceServers = null;
+let lastFetchTime = 0;
+const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+
+/**
+ * Dynamically resolves ICE servers from backend.
+ * Falls back to default STUN list if unreachable.
+ */
+export async function getDynamicIceServers() {
+  const now = Date.now();
+  if (cachedIceServers && now - lastFetchTime < CACHE_TTL_MS) {
+    return cachedIceServers;
+  }
+
+  try {
+    const response = await fetch(`${API_BASE_URL}/api/ice-servers?clientId=browser-${Math.random().toString(36).slice(2, 7)}`);
+    if (response.ok) {
+      const data = await response.json();
+      if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
+        cachedIceServers = data.iceServers;
+        lastFetchTime = now;
+        return cachedIceServers;
+      }
+    }
+  } catch (_err) {
+    // Graceful fallback to default STUN servers
+  }
+
+  return DEFAULT_ICE_SERVERS;
+}
+
+export function createPeerConnection({
+  onIceCandidate,
+  onTrack,
+  iceServers,
+  iceTransportPolicy = "all",
+  onConnectionStateChange,
+  onSelectedCandidatePair
+} = {}) {
+  const configuration = {
+    iceServers: iceServers || cachedIceServers || DEFAULT_ICE_SERVERS,
+    iceTransportPolicy // 'all' for standard, 'relay' for restrictive network testing
+  };
+
+  const peerConnection = new RTCPeerConnection(configuration);
 
   peerConnection.onicecandidate = (event) => {
     if (event.candidate && onIceCandidate) {
@@ -21,12 +65,76 @@ export function createPeerConnection({ onIceCandidate, onTrack }) {
     }
   };
 
+  peerConnection.onconnectionstatechange = () => {
+    const state = peerConnection.connectionState;
+    if (onConnectionStateChange) {
+      onConnectionStateChange(state);
+    }
+
+    if (state === "connected" && onSelectedCandidatePair) {
+      inspectCandidatePair(peerConnection)
+        .then((pair) => onSelectedCandidatePair(pair))
+        .catch(() => {});
+    }
+  };
+
+  peerConnection.oniceconnectionstatechange = () => {
+    if (peerConnection.iceConnectionState === "connected" && onSelectedCandidatePair) {
+      inspectCandidatePair(peerConnection)
+        .then((pair) => onSelectedCandidatePair(pair))
+        .catch(() => {});
+    }
+  };
+
   return peerConnection;
 }
 
+/**
+ * Inspects RTCPeerConnection stats to extract active ICE candidate pair and type (host, srflx, relay).
+ */
+export async function inspectCandidatePair(peerConnection) {
+  if (!peerConnection || typeof peerConnection.getStats !== "function") {
+    return null;
+  }
+
+  try {
+    const stats = await peerConnection.getStats();
+    let selectedPair = null;
+
+    stats.forEach((report) => {
+      if (report.type === "transport" && report.selectedCandidatePairId) {
+        selectedPair = stats.get(report.selectedCandidatePairId);
+      }
+    });
+
+    if (!selectedPair) {
+      stats.forEach((report) => {
+        if (report.type === "candidate-pair" && (report.selected || report.nominated || report.state === "succeeded")) {
+          selectedPair = report;
+        }
+      });
+    }
+
+    if (selectedPair) {
+      const localCandidate = stats.get(selectedPair.localCandidateId);
+      const remoteCandidate = stats.get(selectedPair.remoteCandidateId);
+
+      return {
+        state: selectedPair.state,
+        localCandidateType: localCandidate?.candidateType || "unknown",
+        localProtocol: localCandidate?.protocol || "unknown",
+        remoteCandidateType: remoteCandidate?.candidateType || "unknown",
+        remoteProtocol: remoteCandidate?.protocol || "unknown",
+        isRelayed: localCandidate?.candidateType === "relay" || remoteCandidate?.candidateType === "relay"
+      };
+    }
+  } catch (_e) {}
+
+  return null;
+}
+
 export async function captureHostAudio(audioSourceMode) {
-  // If microphone / device speaker mode: use pure uncompressed audio without noise cancellation
-  // (Noise cancellation actively suppresses and erases music from YouTube, Spotify, and instruments)
+  // If microphone / device speaker mode: use pure uncompressed audio without aggressive voice suppression
   if (audioSourceMode === "microphone") {
     return navigator.mediaDevices.getUserMedia({
       audio: {
@@ -63,7 +171,7 @@ export async function captureHostAudio(audioSourceMode) {
     }
   }
 
-  // Fallback: Pure stereo audio capture without music filters
+  // Fallback: Pure stereo audio capture
   return navigator.mediaDevices.getUserMedia({
     audio: {
       echoCancellation: false,
@@ -75,4 +183,3 @@ export async function captureHostAudio(audioSourceMode) {
     video: false
   });
 }
-
