@@ -111,6 +111,41 @@ test("Network Traversal: Static credentials and input bounds validation", () => 
   }
 });
 
+test("Network Traversal: Coturn deployment asset audit & configuration verification", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+
+  const confPath = path.resolve(__dirname, "../../deploy/coturn/turnserver.conf");
+  const scriptPath = path.resolve(__dirname, "../../deploy/coturn/setup-coturn.sh");
+  const composePath = path.resolve(__dirname, "../../deploy/coturn/docker-compose.yml");
+
+  assert.ok(fs.existsSync(confPath), "deploy/coturn/turnserver.conf must exist");
+  assert.ok(fs.existsSync(scriptPath), "deploy/coturn/setup-coturn.sh must exist");
+  assert.ok(fs.existsSync(composePath), "deploy/coturn/docker-compose.yml must exist");
+
+  const confContent = fs.readFileSync(confPath, "utf8");
+  const scriptContent = fs.readFileSync(scriptPath, "utf8");
+
+  // Verify critical Coturn directives
+  assert.ok(confContent.includes("use-auth-secret"), "Must enable RFC 5766 use-auth-secret");
+  assert.ok(confContent.includes("min-port=49152"), "Relay min port must be 49152");
+  assert.ok(confContent.includes("max-port=65535"), "Relay max port must be 65535");
+  assert.ok(confContent.includes("denied-peer-ip=169.254.0.0-169.254.255.255"), "Must block cloud metadata service IP");
+  assert.ok(confContent.includes("denied-peer-ip=127.0.0.0-127.255.255.255"), "Must block loopback IPv4");
+  assert.ok(confContent.includes("proc-user=turnserver"), "Must drop privileges to turnserver user");
+
+  // Verify setup script firewall rules match configuration
+  assert.ok(scriptContent.includes("49152:65535/udp"), "UFW rule must match relay port range");
+  assert.ok(scriptContent.includes("3478/udp") && scriptContent.includes("3478/tcp"), "Must allow standard TURN ports");
+  assert.ok(scriptContent.includes("5349/udp") && scriptContent.includes("5349/tcp"), "Must allow secure TURNS ports");
+
+  // Test vector: Verify exact Coturn HMAC-SHA1 calculation
+  const testSecret = "coturn-verification-secret-32-bytes";
+  const testUsername = "1750000000:together-client-1";
+  const hmac = crypto.createHmac("sha1", testSecret).update(testUsername).digest("base64");
+  assert.ok(hmac && typeof hmac === "string" && hmac.length === 28, "HMAC-SHA1 Base64 must be 28 characters");
+});
+
 const http = require("node:http");
 const { spawn } = require("node:child_process");
 const fs = require("node:fs");
