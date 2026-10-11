@@ -883,12 +883,28 @@ setInterval(() => {
   }
 }, 30 * 60 * 1000).unref();
 
-server.listen(PORT, "0.0.0.0", () => {
+server.listen(PORT, "0.0.0.0", async () => {
   const localIp = getLocalIpv4Address();
   logger.info(`TOGETHER backend listening on port ${PORT}`, {
     port: PORT,
     localUrl: `http://localhost:${PORT}`,
     lanUrl: localIp ? `http://${localIp}:${PORT}` : null
   });
+
+  try {
+    const db = getDatabase();
+    await db.waitForReady();
+    const health = await db.checkHealth();
+    logger.info(`[DB Startup] Selected driver: ${health.driver} | Storage: ${health.storageType} | Status: ${health.status}`, {
+      driver: health.driver,
+      storageType: health.storageType,
+      healthy: health.healthy
+    });
+    if (!health.healthy) {
+      logger.warn(`[DB Startup] Database initialization degraded: ${health.error || "unhealthy"}`);
+    }
+  } catch (err) {
+    logger.error("[DB Startup] Database initialization error", { error: err.message });
+  }
 });
 

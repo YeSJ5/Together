@@ -38,6 +38,7 @@ class TogetherDatabase {
     };
     this.readyPromise = null;
     this.syncInterval = null;
+    this.initError = null;
 
     this.init();
   }
@@ -57,6 +58,7 @@ class TogetherDatabase {
 
   init() {
     if (this.isPg) {
+      console.log("[DB] Detected DATABASE_URL. Initializing PostgreSQL adapter...");
       try {
         const poolConfig = {
           connectionString: this.databaseUrl,
@@ -81,15 +83,18 @@ class TogetherDatabase {
               }, 15000);
               if (this.syncInterval.unref) this.syncInterval.unref();
             }
+            console.log("[DB] PostgreSQL adapter initialized successfully. Migrations applied and cache hydrated.");
           })
           .catch((err) => {
             console.error("[DB] PostgreSQL migration or cache hydration failed:", err.message);
+            this.initError = err.message;
           });
         return;
       } catch (err) {
         console.warn("[DB] PostgreSQL initialization failed, falling back to SQLite/JSON:", err.message);
         this.isPg = false;
         this.pgPool = null;
+        this.initError = err.message;
       }
     }
 
@@ -785,6 +790,15 @@ class TogetherDatabase {
   async checkHealth() {
     try {
       if (this.isPg && this.pgPool) {
+        if (this.initError) {
+          return {
+            status: "degraded",
+            driver: "postgresql",
+            storageType: "managed-cloud",
+            healthy: false,
+            error: this.initError
+          };
+        }
         const res = await this.pgPool.query("SELECT 1 as alive");
         return {
           status: "connected",
@@ -815,6 +829,7 @@ class TogetherDatabase {
       return {
         status: "degraded",
         driver: this.getDriverName(),
+        storageType: this.isPg ? "managed-cloud" : (this.isSqlite ? (process.env.RENDER && !process.env.TOGETHER_PERSISTENT_DISK ? "ephemeral-container" : "local-disk") : "ephemeral-journal"),
         healthy: false,
         error: err.message
       };
