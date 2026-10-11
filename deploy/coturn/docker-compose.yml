@@ -1,0 +1,15 @@
+version: "3.8"
+
+services:
+  coturn:
+    image: coturn/coturn:latest
+    container_name: together-coturn
+    restart: always
+    # network_mode: host is mandatory for WebRTC TURN relays to directly bind
+    # to the host's public IP and dynamic ephemeral UDP relay port range (49152-65535).
+    network_mode: host
+    volumes:
+      - ./turnserver.conf:/etc/coturn/turnserver.conf:ro
+      - /etc/letsencrypt:/etc/letsencrypt:ro
+    environment:
+      - TZ=UTC
