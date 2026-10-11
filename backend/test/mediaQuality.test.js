@@ -78,8 +78,8 @@ async function run() {
 
       const buffer = new Uint8Array(analyser.frequencyBinCount);
 
-      // Measure sustained transmission over 1.5 seconds (15 samples x 100ms)
-      for (let i = 0; i < 15; i++) {
+      // Measure sustained transmission over up to 2.5 seconds (up to 25 samples x 100ms)
+      for (let i = 0; i < 25; i++) {
         await new Promise((r) => setTimeout(r, 100));
         analyser.getByteFrequencyData(buffer);
         let sum = 0;
@@ -87,18 +87,21 @@ async function run() {
         const avg = sum / buffer.length;
         if (avg > maxAudioEnergy) maxAudioEnergy = avg;
         if (avg > 0) samplesCount++;
-      }
 
-      // Collect inbound-rtp statistics from RTCPeerConnection
-      const stats = await pcListener.getStats();
-      stats.forEach((report) => {
-        if (report.type === "inbound-rtp" && (report.kind === "audio" || report.mediaType === "audio")) {
-          receivedPackets = report.packetsReceived || 0;
-          packetsLost = report.packetsLost || 0;
-          jitter = report.jitter || 0;
-          bytesReceived = report.bytesReceived || 0;
-        }
-      });
+        const stats = await pcListener.getStats();
+        stats.forEach((report) => {
+          if (report.type === "inbound-rtp" && (report.kind === "audio" || report.mediaType === "audio")) {
+            if ((report.packetsReceived || 0) > receivedPackets) {
+              receivedPackets = report.packetsReceived || 0;
+              packetsLost = report.packetsLost || 0;
+              jitter = report.jitter || 0;
+              bytesReceived = report.bytesReceived || 0;
+            }
+          }
+        });
+
+        if (receivedPackets >= 30 && i >= 15) break;
+      }
 
       // 4. Test Resource Cleanup / Teardown
       audioTrack.stop();

@@ -36,6 +36,8 @@ class TogetherDatabase {
       user_profiles: new Map(),
       room_events: []
     };
+    this.readyPromise = null;
+    this.syncInterval = null;
 
     this.init();
   }
@@ -44,6 +46,13 @@ class TogetherDatabase {
     if (this.isPg) return "postgresql";
     if (this.isSqlite) return "sqlite";
     return "json-journal";
+  }
+
+  async waitForReady() {
+    if (this.readyPromise) {
+      await this.readyPromise;
+    }
+    return this;
   }
 
   init() {
@@ -62,8 +71,17 @@ class TogetherDatabase {
         }
 
         this.pgPool = new pg.Pool(poolConfig);
-        this.runPgMigrations()
+        this.readyPromise = this.runPgMigrations()
           .then(() => this.hydratePgCache())
+          .then(() => {
+            // Periodic sync from PostgreSQL to ensure multi-instance consistency
+            if (!this.syncInterval) {
+              this.syncInterval = setInterval(() => {
+                this.hydratePgCache().catch(() => {});
+              }, 15000);
+              if (this.syncInterval.unref) this.syncInterval.unref();
+            }
+          })
           .catch((err) => {
             console.error("[DB] PostgreSQL migration or cache hydration failed:", err.message);
           });
@@ -318,6 +336,7 @@ class TogetherDatabase {
     const now = Date.now();
     const currentTrackJson = room.currentTrack ? JSON.stringify(room.currentTrack) : null;
 
+    const prev = this.cache.rooms.get(room.roomId);
     this.cache.rooms.set(room.roomId, {
       ...room,
       updatedAt: now
@@ -363,7 +382,14 @@ class TogetherDatabase {
         room.createdAt || now,
         now,
         room.endedAt || null
-      ]).catch((e) => console.error("[DB PG] upsertRoom error:", e.message));
+      ]).catch((e) => {
+        console.error("[DB PG] upsertRoom error - reverting cache:", e.message);
+        if (prev) {
+          this.cache.rooms.set(room.roomId, prev);
+        } else {
+          this.cache.rooms.delete(room.roomId);
+        }
+      });
       return;
     }
 
@@ -418,6 +444,61 @@ class TogetherDatabase {
     }
   }
 
+  async upsertRoomAsync(room) {
+    const now = Date.now();
+    const currentTrackJson = room.currentTrack ? JSON.stringify(room.currentTrack) : null;
+
+    if (this.isPg && this.pgPool) {
+      await this.waitForReady();
+      const query = `
+        INSERT INTO rooms (
+          room_id, title, category, is_public, host_id, host_name, host_key,
+          audio_source_mode, media_backend, status, current_track,
+          livekit_room_name, native_mobile_recommended, created_at, updated_at, ended_at
+        ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+        ON CONFLICT(room_id) DO UPDATE SET
+          title = EXCLUDED.title,
+          category = EXCLUDED.category,
+          is_public = EXCLUDED.is_public,
+          host_id = EXCLUDED.host_id,
+          host_name = EXCLUDED.host_name,
+          host_key = COALESCE(EXCLUDED.host_key, rooms.host_key),
+          audio_source_mode = EXCLUDED.audio_source_mode,
+          media_backend = EXCLUDED.media_backend,
+          status = EXCLUDED.status,
+          current_track = EXCLUDED.current_track,
+          livekit_room_name = EXCLUDED.livekit_room_name,
+          native_mobile_recommended = EXCLUDED.native_mobile_recommended,
+          updated_at = EXCLUDED.updated_at,
+          ended_at = EXCLUDED.ended_at;
+      `;
+      await this.pgPool.query(query, [
+        room.roomId,
+        room.title || "Room",
+        room.category || "Music",
+        room.isPublic ? 1 : 0,
+        room.hostId,
+        room.hostName || "Host",
+        room.hostKey || null,
+        room.audioSourceMode || "universal",
+        room.mediaBackend || "webrtc-direct",
+        room.status || "active",
+        currentTrackJson,
+        room.liveKitRoomName || null,
+        room.nativeMobileRecommended ? 1 : 0,
+        room.createdAt || now,
+        now,
+        room.endedAt || null
+      ]);
+      const updated = { ...room, updatedAt: now };
+      this.cache.rooms.set(room.roomId, updated);
+      return updated;
+    }
+
+    this.upsertRoom(room);
+    return this.getRoom(room.roomId);
+  }
+
   getRoom(roomId) {
     if (!roomId) return null;
 
@@ -434,6 +515,33 @@ class TogetherDatabase {
 
     const room = this.jsonStore.rooms.get(roomId);
     return room ? { ...room } : null;
+  }
+
+  async getRoomAsync(roomId, { forceRefresh = false } = {}) {
+    if (!roomId) return null;
+
+    if (this.isPg && this.pgPool) {
+      await this.waitForReady();
+      if (!forceRefresh && this.cache.rooms.has(roomId)) {
+        return { ...this.cache.rooms.get(roomId) };
+      }
+      try {
+        const res = await this.pgPool.query("SELECT * FROM rooms WHERE room_id = $1", [roomId]);
+        if (res.rows?.[0]) {
+          const formatted = this.formatRoomRow(res.rows[0]);
+          this.cache.rooms.set(roomId, formatted);
+          return formatted;
+        } else {
+          this.cache.rooms.delete(roomId);
+          return null;
+        }
+      } catch (err) {
+        console.warn("[DB PG] getRoomAsync error, using cache:", err.message);
+        return this.getRoom(roomId);
+      }
+    }
+
+    return this.getRoom(roomId);
   }
 
   listPublicActiveRooms() {
@@ -463,6 +571,27 @@ class TogetherDatabase {
       }
     }
     return res.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  }
+
+  async listPublicActiveRoomsAsync() {
+    if (this.isPg && this.pgPool) {
+      await this.waitForReady();
+      try {
+        const res = await this.pgPool.query(
+          "SELECT * FROM rooms WHERE status = 'active' AND is_public = 1 ORDER BY created_at DESC LIMIT 200"
+        );
+        const rooms = (res.rows || []).map((r) => this.formatRoomRow(r));
+        for (const room of rooms) {
+          this.cache.rooms.set(room.roomId, room);
+        }
+        return rooms;
+      } catch (err) {
+        console.warn("[DB PG] listPublicActiveRoomsAsync error, falling back to cache:", err.message);
+        return this.listPublicActiveRooms();
+      }
+    }
+
+    return this.listPublicActiveRooms();
   }
 
   deleteOrEndRoom(roomId) {
@@ -693,6 +822,12 @@ class TogetherDatabase {
   }
 
   close() {
+    if (this.syncInterval) {
+      try {
+        clearInterval(this.syncInterval);
+        this.syncInterval = null;
+      } catch (_e) {}
+    }
     if (this.pgPool) {
       try {
         this.pgPool.end().catch(() => {});

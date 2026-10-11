@@ -423,13 +423,15 @@ PORT=5000
 CLIENT_ORIGIN=https://your-frontend.vercel.app
 ```
 
-## Current Product Highlights (v2.4)
+## Current Product Highlights (v2.5)
 
 - **Browser-First Background Playback**: Persistent floating mini-player preserving audio state across all internal route navigation.
-- **Audio Playback Path Deduping**: Unified singleton audio node (`persistentAudioRef` in `AudioRoomContext`) eliminating duplicate playback tags, audio flanging, and phantom autoplay issues.
-- **Production Persistence Durability**: Dual-engine persistence layer supporting SQLite for local development and managed PostgreSQL for cloud durability with synchronous in-memory write-through cache and automated schema migrations. Accurate HTTP 503 readiness failure on database disruption.
-- **WebRTC Mesh Media Load Verification**: Empirically measured in headless Chromium with 5 concurrent listeners receiving active audio streams with 0% packet loss, 14.2ms jitter, and 52 kbps total host upload bandwidth (~10.4 kbps/peer).
-- **Hardened TURN Traversal**: Parameter-sanitized ICE configuration supporting dynamic HMAC-SHA1 credentials and static auth with strict parameter validation and safe diagnostics.
+- **Audio Playback Path Deduping**: Unified singleton audio node (`persistentAudioRef` in `AudioRoomContext`) eliminating duplicate playback tags, audio flanging, and phantom autoplay issues. Manual play, volume, mute, resume, and teardown route exclusively through the singleton ref.
+- **Production Persistence Durability & Multi-Instance Resilience**: Dual-engine persistence layer supporting SQLite for local development and managed PostgreSQL for cloud durability. Protected against dirty cache writes via optimistic rollback on query failure, periodic background reconciliation (every 15s), and authoritative async queries (`getRoomAsync`, `listPublicActiveRoomsAsync`). Accurate HTTP 503 readiness failure on database disruption.
+- **WebRTC Mesh Media Load Verification**: Empirically measured in headless Chromium across progressive listener tiers:
+  - **Tier 1 (5 Listeners)**: 5 of 5 receiving audio (100%), 0 packet loss, 182 kbps host upload (~36.4 kbps/peer), 5.2ms average jitter.
+  - **Tier 2 (8 Listeners)**: 8 of 8 receiving audio (100%), 0 packet loss, 298 kbps host upload (~37.3 kbps/peer), 7.0ms average jitter.
+- **Hardened TURN Traversal**: Parameter-sanitized ICE configuration supporting dynamic HMAC-SHA1 credentials and static auth with strict parameter validation and safe diagnostics. Frontend caches ICE credentials bounded by server TTL (`data.ttl`).
 - **Live Public Stages Discovery**: Explore active broadcasts filtered by category (Music, Study, Lecture, Podcast, DJ).
 - **Live Speech-to-Text Transcripts & Subtitles**: Browser speech engine transcription broadcasting real-time captions for lectures and accessibility.
 - **Synchronized Track Announcement**: Host broadcasts track title and artist from Spotify, YouTube, or audio files with synchronized listener timeline.
@@ -442,7 +444,7 @@ CLIENT_ORIGIN=https://your-frontend.vercel.app
 
 - **Cloud Database Provisioning**: Render blueprint declares `together-postgres` for persistent PostgreSQL storage. When unconfigured, fallback SQLite runs in container memory (`ephemeral-container`).
 - **Mobile Browsers**: Background audio execution depends on OS battery management and Web Audio wake lock policies.
-- **Symmetric NAT / Restrictive Firewalls**: P2P WebRTC mesh operates smoothly across local, intranet, and STUN-traversable networks. Symmetric NAT and restrictive enterprise firewalls require external TURN relay credentials (`TURN_URLS`, `TURN_SECRET`). LiveKit SFU is supported via configuration for large-scale stages.
+- **Symmetric NAT / Restrictive Firewalls**: P2P WebRTC mesh operates smoothly across local, intranet, and STUN-traversable networks. Symmetric NAT and restrictive enterprise firewalls require external TURN relay credentials (`TURN_URLS`, `TURN_SECRET`). LiveKit SFU is supported via configuration for large-scale stages (> 8-10 peers).
 
 ## Creator Signature
 

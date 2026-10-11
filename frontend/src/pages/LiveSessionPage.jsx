@@ -52,7 +52,6 @@ export default function LiveSessionPage() {
 
   const socketRef = useRef(null);
   const peerConnectionRef = useRef(null);
-  const audioElementRef = useRef(null);
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
   const animFrameRef = useRef(null);
@@ -269,8 +268,8 @@ export default function LiveSessionPage() {
       if (audioContextRef.current && audioContextRef.current.state === "suspended") {
         audioContextRef.current.resume().catch(() => {});
       }
-      if (audioElementRef.current && isPlaying && audioElementRef.current.paused) {
-        audioElementRef.current.play().catch(() => {});
+      if (persistentAudioRef.current && isPlaying && persistentAudioRef.current.paused) {
+        persistentAudioRef.current.play().catch(() => {});
       }
     };
 
@@ -371,9 +370,9 @@ export default function LiveSessionPage() {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
-    if (audioElementRef.current) {
-      audioElementRef.current.pause();
-      audioElementRef.current.srcObject = null;
+    if (persistentAudioRef.current) {
+      persistentAudioRef.current.pause();
+      persistentAudioRef.current.srcObject = null;
     }
     if ("mediaSession" in navigator) {
       try {
@@ -401,14 +400,14 @@ export default function LiveSessionPage() {
   }
 
   function handleManualPlay() {
-    if (audioElementRef.current) {
-      audioElementRef.current.play()
+    if (persistentAudioRef.current) {
+      persistentAudioRef.current.play()
         .then(() => {
           setIsPlaying(true);
           setNeedsGesture(false);
           configureMediaSession();
-          if (audioElementRef.current.srcObject) {
-            setupAudioVisualizer(audioElementRef.current.srcObject);
+          if (persistentAudioRef.current.srcObject) {
+            setupAudioVisualizer(persistentAudioRef.current.srcObject);
           }
         })
         .catch(() => {});
@@ -419,16 +418,16 @@ export default function LiveSessionPage() {
     const val = parseFloat(e.target.value);
     setVolume(val);
     setIsMuted(false);
-    if (audioElementRef.current) {
-      audioElementRef.current.volume = val;
+    if (persistentAudioRef.current) {
+      persistentAudioRef.current.volume = val;
     }
   }
 
   function toggleMute() {
     const nextMuted = !isMuted;
     setIsMuted(nextMuted);
-    if (audioElementRef.current) {
-      audioElementRef.current.volume = nextMuted ? 0 : volume;
+    if (persistentAudioRef.current) {
+      persistentAudioRef.current.volume = nextMuted ? 0 : volume;
     }
   }
 

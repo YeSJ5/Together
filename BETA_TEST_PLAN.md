@@ -1,4 +1,4 @@
-# TOGETHER v2.4 — Controlled Public Beta Test Plan & Runbook
+# TOGETHER v2.5 — Controlled Public Beta Test Plan & Runbook
 
 **Product**: TOGETHER (Browser-First Synchronized Audio Platform)  
 **Production Web App**: [https://together-puce.vercel.app/](https://together-puce.vercel.app/)  
@@ -29,33 +29,38 @@ Measurements collected across 5 independent browser automation samples in Chromi
 
 | Measurement Metric | Sample Count | Median | P95 | Notes / Limitation |
 | :--- | :---: | :---: | :---: | :--- |
-| **Room Creation Duration** | 5 | **285.4 ms** | **3,253.8 ms** | HTTP POST `/create-session` (DB journal write) |
-| **Room Join Duration** | 5 | **5.3 ms** | **134.8 ms** | HTTP POST `/session/:id/join` |
-| **Signaling Handshake** | 5 | **43.2 ms** | **398.6 ms** | WebRTC offer/answer/ICE exchange completion |
-| **Time to 1st Audio Packet** | 5 | **129.1 ms** | **494.7 ms** | First inbound RTP packet received (`inbound-rtp`) |
-| **Time to Audible Playback** | 5 | **147.0 ms** | **822.3 ms** | First non-zero energy detected by `AudioContext` |
-| **Inbound RTP Packets/sec** | 5 | **58 pkts/s** | **65 pkts/s** | Standard Opus audio packetization (20ms frames) |
+| **Room Creation Duration** | 5 | **644.2 ms** | **2,012.7 ms** | HTTP POST `/create-session` (DB journal write) |
+| **Room Join Duration** | 5 | **5.5 ms** | **41.8 ms** | HTTP POST `/session/:id/join` |
+| **Signaling Handshake** | 5 | **86.1 ms** | **182.4 ms** | WebRTC offer/answer/ICE exchange completion |
+| **Time to 1st Audio Packet** | 5 | **193.5 ms** | **359.8 ms** | First inbound RTP packet received (`inbound-rtp`) |
+| **Time to Audible Playback** | 5 | **217.7 ms** | **330.5 ms** | First non-zero energy detected by `AudioContext` |
+| **Inbound RTP Packets/sec** | 5 | **57 pkts/s** | **65 pkts/s** | Standard Opus audio packetization (20ms frames) |
 | **Packet Loss** | 5 | **0%** | **0%** | Zero loss over local and STUN direct candidate pairs |
-| **Jitter** | 5 | **4.00 ms** | **4.00 ms** | WebRTC jitter buffer delay |
+| **Jitter** | 5 | **4.00 ms** | **6.00 ms** | WebRTC jitter buffer delay |
 | **Selected Candidate Type** | 5 | `host` | `host` | Direct peer-to-peer / STUN candidate |
 | **Teardown & Cleanup** | 5 | **< 10 ms** | **< 20 ms** | Clean destruction of AudioContext & RTCPeerConnection |
 
 ### B. Multi-Peer Mesh Media Delivery Benchmark (Empirical Headless Chromium Load Test)
-Empirical media delivery under concurrent load tested in [`backend/test/meshMediaLoad.test.js`](file:///f:/Together/Together/backend/test/meshMediaLoad.test.js):
+Empirical media delivery under concurrent load tested across progressive listener tiers in [`backend/test/meshMediaLoad.test.js`](file:///f:/Together/Together/backend/test/meshMediaLoad.test.js):
 
-| Benchmark Metric | Measured Result | Verification Label | Notes |
+| Tier & Metrics | Measured Result | Verification Label | Notes |
 | :--- | :--- | :--- | :--- |
-| **Concurrent Listeners** | 5 connected listeners | Verified in local automated tests | 1 broadcaster host + 5 concurrent peer connections |
-| **Receiving Active Audio** | 5 of 5 listeners (100%) | Verified in local automated tests | Measured via `getStats()` inbound audio track delivery |
-| **Total Host Upload Bandwidth** | 52.0 kbps (~10.4 kbps / peer) | Verified in local automated tests | Clean mesh scaling without bitrate explosion |
-| **Inbound Packets Received** | 50 pkts / second / listener | Verified in local automated tests | Sustained 20ms audio frame packet cadence |
-| **Packet Loss** | 0.00% across all 5 peers | Verified in local automated tests | Zero packet drops during sustained streaming |
-| **Average Jitter** | 14.2 ms | Verified in local automated tests | Jitter buffer maintains smooth continuous audio |
-| **Audio Routing Architecture** | Singleton `persistentAudioRef` | Verified in local automated tests | Deduped audio tags in `LiveSessionPage.jsx` prevents flanging |
+| **Tier 1: 5 Concurrent Listeners** | 5 of 5 receiving audio (100%) | **Verified in local automated tests** | Sustained streaming across 5 peer connections |
+| • Host Upload Bandwidth (Tier 1) | 182 kbps (~36.4 kbps / peer) | **Verified in local automated tests** | Efficient Opus packetization without packet loss |
+| • Total Packet Loss (Tier 1) | 0 packets (0.00%) | **Verified in local automated tests** | Zero drops across all 5 receiver peer connections |
+| • Average Jitter (Tier 1) | 5.20 ms | **Verified in local automated tests** | Jitter buffer delay remains nominal |
+| **Tier 2: 8 Concurrent Listeners** | 8 of 8 receiving audio (100%) | **Verified in local automated tests** | Sustained streaming across 8 peer connections |
+| • Host Upload Bandwidth (Tier 2) | 298 kbps (~37.3 kbps / peer) | **Verified in local automated tests** | Linear mesh upload scaling without bitrate explosion |
+| • Total Packet Loss (Tier 2) | 0 packets (0.00%) | **Verified in local automated tests** | Zero drops across all 8 receiver peer connections |
+| • Average Jitter (Tier 2) | 7.00 ms | **Verified in local automated tests** | Jitter remains well within acceptable threshold (< 30ms) |
+| **Audio Routing Architecture** | Singleton `persistentAudioRef` | **Verified in local automated tests** | Deduped audio tags eliminate flanging and phase cancellation |
 
 > [!NOTE]
 > **Signaling Latency vs. Audio Startup Latency**:
-> Signaling exchange completes in **43.2 ms** median, while audible playback begins at **147.0 ms** median. Signaling completion is strictly the exchange of SDP and ICE candidates and must never be conflated with audible audio reception.
+> Signaling exchange completes in **86.1 ms** median, while audible playback begins at **217.7 ms** median. Signaling completion is strictly the exchange of SDP and ICE candidates and must never be conflated with audible audio reception.
+>
+> **Conservative Mesh Capacity Limit**:
+> Pure WebRTC mesh media delivery is empirically proven up to **8 concurrent listeners** (~37 kbps/peer upload). For broadcast audiences beyond 8–10 concurrent listeners, host uplink bandwidth becomes the constraint; LiveKit SFU transport is recommended for larger stages.
 
 ---
 

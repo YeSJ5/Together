@@ -17,7 +17,9 @@ const {
   getDatabase,
   getRawSession,
   getSession,
+  getSessionAsync,
   listActivePublicSessions,
+  listActivePublicSessionsAsync,
   setHostConnected,
   updateSession,
   verifyHostKey
@@ -99,7 +101,7 @@ app.use((request, response, next) => {
 app.get("/api", (_request, response) => {
   response.json({
     product: "TOGETHER",
-    version: "2.4.0",
+    version: "2.5.0",
     status: "running"
   });
 });
@@ -108,16 +110,16 @@ app.get("/api/health", async (_request, response) => {
   try {
     const db = getDatabase();
     const dbHealth = await db.checkHealth();
-    const dbRooms = db.listPublicActiveRooms();
+    const dbRooms = await db.listPublicActiveRoomsAsync();
     const mem = process.memoryUsage();
     const ice = getIceServerConfig();
-    const activePublicRooms = listActivePublicSessions();
+    const activePublicRooms = await listActivePublicSessionsAsync();
 
     const isHealthy = dbHealth.healthy !== false && dbHealth.status === "connected";
 
     return response.status(isHealthy ? 200 : 503).json({
       product: "TOGETHER",
-      version: "2.4.0",
+      version: "2.5.0",
       status: isHealthy ? "ok" : "degraded",
       ready: isHealthy,
       uptimeSeconds: Math.floor(process.uptime()),
@@ -190,9 +192,10 @@ app.get("/api/runtime", (request, response) => {
   });
 });
 
-app.get("/api/rooms", (_request, response) => {
+app.get("/api/rooms", async (_request, response) => {
+  const rooms = await listActivePublicSessionsAsync();
   response.json({
-    rooms: listActivePublicSessions()
+    rooms
   });
 });
 
@@ -325,8 +328,8 @@ app.post("/session/:id/livekit-token", async (request, response) => {
   }
 });
 
-app.get("/session/:id", (request, response) => {
-  const session = getSession(request.params.id);
+app.get("/session/:id", async (request, response) => {
+  const session = await getSessionAsync(request.params.id);
 
   if (!session) {
     return response.status(404).json({

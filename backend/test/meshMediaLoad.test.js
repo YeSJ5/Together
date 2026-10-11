@@ -54,8 +54,8 @@ async function runMeshLoadTest() {
     const hostAudioTrack = hostStream.getAudioTracks()[0];
     if (!hostAudioTrack) throw new Error("Could not capture host audio track");
 
-    // We will test 5 concurrent listeners receiving active audio simultaneously
-    const LISTENER_COUNTS = [5];
+    // We will test progressively increasing tiers: 5 concurrent listeners, then 8 concurrent listeners
+    const LISTENER_COUNTS = [5, 8];
     const tierResults = [];
 
     for (const listenerCount of LISTENER_COUNTS) {
@@ -92,16 +92,23 @@ async function runMeshLoadTest() {
 
           pcListener.ontrack = async (event) => {
             const remoteStream = event.streams[0];
+            const audioEl = document.createElement("audio");
+            audioEl.srcObject = remoteStream;
+            audioEl.autoplay = true;
+            document.body.appendChild(audioEl);
+            await audioEl.play().catch(() => {});
+
             const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
             await audioCtx.resume();
             const source = audioCtx.createMediaStreamSource(remoteStream);
             const analyser = audioCtx.createAnalyser();
             analyser.fftSize = 64;
             source.connect(analyser);
+            analyser.connect(audioCtx.destination);
 
             const buffer = new Uint8Array(analyser.frequencyBinCount);
 
-            // Poll for packets and energy over 1200ms
+            // Poll for packets and energy over 1800ms
             const interval = setInterval(async () => {
               const stats = await pcListener.getStats();
               stats.forEach((s) => {
@@ -119,7 +126,7 @@ async function runMeshLoadTest() {
               if (sum > 0) hasAudioEnergy = true;
             }, 50);
 
-            await new Promise((r) => setTimeout(r, 1200));
+            await new Promise((r) => setTimeout(r, 1800));
             clearInterval(interval);
 
             // Collect final listener stats
@@ -139,6 +146,7 @@ async function runMeshLoadTest() {
             });
 
             await audioCtx.close().catch(() => {});
+            audioEl.remove();
 
             resolveListener({
               listenerIndex: idx + 1,
@@ -183,7 +191,7 @@ async function runMeshLoadTest() {
         });
       }
 
-      // Teardown all PCs in this tier
+      // Teardown all PCs in this tier cleanly
       for (const pc of hostPCs) pc.close();
       for (const pc of listenerPCs) pc.close();
 
@@ -255,8 +263,8 @@ window.addEventListener("DOMContentLoaded", runMeshLoadTest);
 
   const timer = setTimeout(() => {
     killChrome();
-    rejectLoadTest(new Error("Mesh media load test timed out after 20s"));
-  }, 20000);
+    rejectLoadTest(new Error("Mesh media load test timed out after 35s"));
+  }, 35000);
 
   try {
     const report = await loadTestPromise;
@@ -264,27 +272,30 @@ window.addEventListener("DOMContentLoaded", runMeshLoadTest);
     killChrome();
 
     assert.ok(report.success, "Mesh media load test must succeed");
-    const tier5 = report.tierResults[0];
-
+    
     console.log("\n=======================================================");
-    console.log("   TOGETHER v2.4 — WEBRTC MESH MEDIA DELIVERY LOAD    ");
+    console.log("   TOGETHER v2.5 — WEBRTC MESH MEDIA DELIVERY LOAD    ");
     console.log("=======================================================");
-    console.log(`Connected Listeners:        ${tier5.listenerCount}`);
-    console.log(`Successfully Streamed:      ${tier5.listenersReceivingAudio} / ${tier5.listenerCount} listeners (100%)`);
-    console.log(`Host Packets Sent:          ${tier5.totalHostPacketsSent} pkts`);
-    console.log(`Host Upload Bandwidth:      ${tier5.hostBandwidthKbps} kbps (~${(tier5.hostBandwidthKbps / tier5.listenerCount).toFixed(1)} kbps/peer)`);
-    console.log(`Total Packet Loss:          ${tier5.totalLoss} packets`);
-    console.log(`Average Listener Jitter:    ${(tier5.avgJitter * 1000).toFixed(2)} ms`);
-    console.log(`Avg Startup Latency:        ${tier5.avgStartupMs.toFixed(1)} ms`);
-    console.log("=======================================================\n");
 
-    assert.strictEqual(
-      tier5.listenersReceivingAudio,
-      tier5.listenerCount,
-      "All connected listeners must successfully receive audio streams"
-    );
-    assert.strictEqual(tier5.totalLoss, 0, "Packet loss across concurrent mesh peers must be 0");
-    assert.ok(tier5.totalHostPacketsSent > 50, "Host must transmit sustained packets to all listeners");
+    for (const tier of report.tierResults) {
+      console.log(`[Tier: ${tier.listenerCount} Listeners]`);
+      console.log(`  Connected Listeners:        ${tier.listenerCount}`);
+      console.log(`  Successfully Streamed:      ${tier.listenersReceivingAudio} / ${tier.listenerCount} listeners (100%)`);
+      console.log(`  Host Packets Sent:          ${tier.totalHostPacketsSent} pkts`);
+      console.log(`  Host Upload Bandwidth:      ${tier.hostBandwidthKbps} kbps (~${(tier.hostBandwidthKbps / tier.listenerCount).toFixed(1)} kbps/peer)`);
+      console.log(`  Total Packet Loss:          ${tier.totalLoss} packets`);
+      console.log(`  Average Listener Jitter:    ${(tier.avgJitter * 1000).toFixed(2)} ms`);
+      console.log(`  Avg Startup Latency:        ${tier.avgStartupMs.toFixed(1)} ms`);
+
+      assert.strictEqual(
+        tier.listenersReceivingAudio,
+        tier.listenerCount,
+        `All ${tier.listenerCount} connected listeners must successfully receive audio streams`
+      );
+      assert.strictEqual(tier.totalLoss, 0, `Packet loss across ${tier.listenerCount} mesh peers must be 0`);
+      assert.ok(tier.totalHostPacketsSent > 50, `Host must transmit sustained packets to all ${tier.listenerCount} listeners`);
+    }
+    console.log("=======================================================\n");
   } finally {
     clearTimeout(timer);
     killChrome();

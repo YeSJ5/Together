@@ -9,7 +9,7 @@ export const DEFAULT_ICE_SERVERS = [
 
 let cachedIceServers = null;
 let lastFetchTime = 0;
-const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
+let currentCacheTtlMs = 30 * 60 * 1000; // default 30 minutes
 
 /**
  * Dynamically resolves ICE servers from backend.
@@ -17,7 +17,7 @@ const CACHE_TTL_MS = 30 * 60 * 1000; // 30 minutes
  */
 export async function getDynamicIceServers() {
   const now = Date.now();
-  if (cachedIceServers && now - lastFetchTime < CACHE_TTL_MS) {
+  if (cachedIceServers && now - lastFetchTime < currentCacheTtlMs) {
     return cachedIceServers;
   }
 
@@ -28,6 +28,10 @@ export async function getDynamicIceServers() {
       if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
         cachedIceServers = data.iceServers;
         lastFetchTime = now;
+        if (data.ttl && Number(data.ttl) > 0) {
+          // Refresh at 80% of TTL or 30 minutes, minimum 30 seconds
+          currentCacheTtlMs = Math.min(30 * 60 * 1000, Math.max(30000, Number(data.ttl) * 1000 * 0.8));
+        }
         return cachedIceServers;
       }
     }

@@ -187,6 +187,52 @@ function getSession(roomId) {
   return null;
 }
 
+async function getSessionAsync(roomId) {
+  const inMemory = sessions.get(roomId);
+  if (inMemory) {
+    return sanitizeSession(inMemory);
+  }
+
+  const persisted = await db.getRoomAsync(roomId);
+  if (persisted && persisted.status === "active") {
+    const restored = {
+      ...persisted,
+      users: [],
+      events: [],
+      nextEventId: 1,
+      hostConnected: false,
+      restoredFromDb: true
+    };
+    sessions.set(roomId, restored);
+    return sanitizeSession(restored);
+  }
+
+  return null;
+}
+
+async function listActivePublicSessionsAsync() {
+  const localLive = listActivePublicSessions();
+  if (db.isPg) {
+    try {
+      const persistedRooms = await db.listPublicActiveRoomsAsync();
+      const mergedMap = new Map();
+      for (const room of persistedRooms) {
+        mergedMap.set(room.roomId, sanitizeSession(room));
+      }
+      for (const local of localLive) {
+        mergedMap.set(local.roomId, local);
+      }
+      return Array.from(mergedMap.values()).sort((a, b) => {
+        const diff = (b.users?.length || 0) - (a.users?.length || 0);
+        return diff !== 0 ? diff : (b.createdAt || 0) - (a.createdAt || 0);
+      });
+    } catch (_err) {
+      return localLive;
+    }
+  }
+  return localLive;
+}
+
 function getRawSession(roomId) {
   let session = sessions.get(roomId);
   if (!session) {
@@ -273,7 +319,9 @@ module.exports = {
   deleteSession,
   getRawSession,
   getSession,
+  getSessionAsync,
   listActivePublicSessions,
+  listActivePublicSessionsAsync,
   updateSession,
   verifyHostKey,
   setHostConnected,
