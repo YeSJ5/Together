@@ -324,6 +324,40 @@ function clearAllSessionsForTesting() {
   sessions.clear();
 }
 
+async function hydrateSessionsFromDatabase() {
+  try {
+    await db.waitForReady();
+    const persistedRooms = await db.listPublicActiveRoomsAsync();
+    for (const room of persistedRooms) {
+      if (!sessions.has(room.roomId)) {
+        sessions.set(room.roomId, {
+          roomId: room.roomId,
+          title: room.title,
+          category: room.category,
+          isPublic: room.isPublic,
+          hostId: room.hostId,
+          hostName: room.hostName,
+          hostKey: room.hostKey || null,
+          users: [],
+          createdAt: room.createdAt,
+          status: room.status,
+          audioSourceMode: room.audioSourceMode,
+          mediaBackend: room.mediaBackend,
+          nativeMobileRecommended: room.nativeMobileRecommended,
+          liveKitRoomName: room.liveKitRoomName,
+          currentTrack: room.currentTrack,
+          events: [],
+          nextEventId: 1,
+          hostConnected: false,
+          restoredFromDb: true
+        });
+      }
+    }
+  } catch (e) {
+    console.warn("[sessionStore] Could not hydrate sessions from database:", e.message);
+  }
+}
+
 module.exports = {
   createSession,
   deleteSession,
@@ -336,5 +370,6 @@ module.exports = {
   verifyHostKey,
   setHostConnected,
   clearAllSessionsForTesting,
+  hydrateSessionsFromDatabase,
   getDatabase: () => db
 };

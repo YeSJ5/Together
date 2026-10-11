@@ -22,7 +22,8 @@ const {
   listActivePublicSessionsAsync,
   setHostConnected,
   updateSession,
-  verifyHostKey
+  verifyHostKey,
+  hydrateSessionsFromDatabase
 } = require("./sessionStore");
 
 const app = express();
@@ -894,6 +895,7 @@ server.listen(PORT, "0.0.0.0", async () => {
   try {
     const db = getDatabase();
     await db.waitForReady();
+    await hydrateSessionsFromDatabase();
     const health = await db.checkHealth();
     logger.info(`[DB Startup] Selected driver: ${health.driver} | Storage: ${health.storageType} | Status: ${health.status}`, {
       driver: health.driver,
@@ -902,6 +904,9 @@ server.listen(PORT, "0.0.0.0", async () => {
     });
     if (!health.healthy) {
       logger.warn(`[DB Startup] Database initialization degraded: ${health.error || "unhealthy"}`);
+      if (process.env.REQUIRE_POSTGRES === "true" || process.env.REQUIRE_POSTGRES === "1") {
+        logger.error("[DB Startup] FATAL: REQUIRE_POSTGRES is enabled but PostgreSQL connection/schema check failed.");
+      }
     }
   } catch (err) {
     logger.error("[DB Startup] Database initialization error", { error: err.message });

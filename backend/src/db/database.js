@@ -20,12 +20,15 @@ const DEFAULT_DB_PATH = path.resolve(__dirname, "../../data/together.sqlite");
 
 class TogetherDatabase {
   constructor(options = {}) {
-    this.databaseUrl = options.databaseUrl || process.env.DATABASE_URL || null;
+    this.databaseUrl = options.databaseUrl !== undefined ? options.databaseUrl : (process.env.DATABASE_URL || null);
+    this.requirePostgres = options.requirePostgres !== undefined
+      ? Boolean(options.requirePostgres)
+      : (process.env.REQUIRE_POSTGRES === "true" || process.env.REQUIRE_POSTGRES === "1");
     this.dbPath = options.dbPath || process.env.TOGETHER_DB_PATH || DEFAULT_DB_PATH;
     this.pgPool = null;
     this.db = null;
     this.isPg = Boolean(this.databaseUrl && (this.databaseUrl.startsWith("postgres://") || this.databaseUrl.startsWith("postgresql://")) && pg);
-    this.isSqlite = !this.isPg && Boolean(DatabaseSync);
+    this.isSqlite = !this.isPg && !this.requirePostgres && Boolean(DatabaseSync);
     this.cache = {
       rooms: new Map(),
       user_profiles: new Map(),
@@ -57,6 +60,21 @@ class TogetherDatabase {
   }
 
   init() {
+    if (this.requirePostgres) {
+      if (!this.isPg) {
+        const reason = !this.databaseUrl
+          ? "REQUIRE_POSTGRES is enabled but DATABASE_URL is not configured."
+          : (!pg
+              ? "REQUIRE_POSTGRES is enabled but 'pg' driver module is not available."
+              : "REQUIRE_POSTGRES is enabled but DATABASE_URL is not a valid postgresql:// connection string.");
+        console.error(`[DB] FATAL: ${reason}`);
+        this.initError = reason;
+        this.isPg = true;
+        this.isSqlite = false;
+        return;
+      }
+    }
+
     if (this.isPg) {
       console.log("[DB] Detected DATABASE_URL. Initializing PostgreSQL adapter...");
       try {
@@ -91,10 +109,14 @@ class TogetherDatabase {
           });
         return;
       } catch (err) {
-        console.warn("[DB] PostgreSQL initialization failed, falling back to SQLite/JSON:", err.message);
+        console.error("[DB] PostgreSQL initialization failed:", err.message);
+        this.initError = err.message;
+        if (this.requirePostgres) {
+          return;
+        }
+        console.warn("[DB] Falling back to SQLite/JSON store...");
         this.isPg = false;
         this.pgPool = null;
-        this.initError = err.message;
       }
     }
 
@@ -789,7 +811,7 @@ class TogetherDatabase {
 
   async checkHealth() {
     try {
-      if (this.isPg && this.pgPool) {
+      if (this.isPg) {
         if (this.initError) {
           return {
             status: "degraded",
@@ -797,6 +819,15 @@ class TogetherDatabase {
             storageType: "managed-cloud",
             healthy: false,
             error: this.initError
+          };
+        }
+        if (!this.pgPool) {
+          return {
+            status: "degraded",
+            driver: "postgresql",
+            storageType: "managed-cloud",
+            healthy: false,
+            error: "PostgreSQL pool uninitialized"
           };
         }
         const res = await this.pgPool.query("SELECT 1 as alive");
