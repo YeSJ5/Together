@@ -6,7 +6,8 @@
     "build": "node -e \"console.log('TOGETHER backend does not require a separate build step.')\"",
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
-    "test": "node --test test/*.test.js"
+    "test": "node --test test/*.test.js",
+    "migrate": "node scripts/migrateSqliteToPg.js"
   },
   "dependencies": {
     "cors": "^2.8.5",

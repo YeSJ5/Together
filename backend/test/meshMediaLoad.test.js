@@ -108,8 +108,14 @@ async function runMeshLoadTest() {
 
             const buffer = new Uint8Array(analyser.frequencyBinCount);
 
-            // Poll for packets and energy over 1800ms
-            const interval = setInterval(async () => {
+            let packetsReceived = 0;
+            let bytesReceived = 0;
+            let packetsLost = 0;
+            let jitter = 0;
+
+            // Poll for packets and energy over up to 2.5 seconds
+            for (let p = 0; p < 25; p++) {
+              await new Promise((r) => setTimeout(r, 100));
               const stats = await pcListener.getStats();
               stats.forEach((s) => {
                 if (s.type === "inbound-rtp" && s.packetsReceived > 0) {
@@ -117,6 +123,10 @@ async function runMeshLoadTest() {
                     hasReceivedPackets = true;
                     firstPacketMs = performance.now() - startTime;
                   }
+                  packetsReceived = s.packetsReceived || 0;
+                  bytesReceived = s.bytesReceived || 0;
+                  packetsLost = s.packetsLost || 0;
+                  jitter = s.jitter || 0;
                 }
               });
 
@@ -124,26 +134,9 @@ async function runMeshLoadTest() {
               let sum = 0;
               for (let b = 0; b < buffer.length; b++) sum += buffer[b];
               if (sum > 0) hasAudioEnergy = true;
-            }, 50);
 
-            await new Promise((r) => setTimeout(r, 1800));
-            clearInterval(interval);
-
-            // Collect final listener stats
-            const finalStats = await pcListener.getStats();
-            let packetsReceived = 0;
-            let bytesReceived = 0;
-            let packetsLost = 0;
-            let jitter = 0;
-
-            finalStats.forEach((s) => {
-              if (s.type === "inbound-rtp") {
-                packetsReceived = s.packetsReceived || 0;
-                bytesReceived = s.bytesReceived || 0;
-                packetsLost = s.packetsLost || 0;
-                jitter = s.jitter || 0;
-              }
-            });
+              if (packetsReceived >= 25 && p >= 12) break;
+            }
 
             await audioCtx.close().catch(() => {});
             audioEl.remove();
@@ -163,18 +156,17 @@ async function runMeshLoadTest() {
       });
 
       // Conduct negotiation for all peers concurrently
-      for (let i = 0; i < listenerCount; i++) {
-        const pcHost = hostPCs[i];
-        const pcListener = listenerPCs[i];
-
-        const offer = await pcHost.createOffer();
-        await pcHost.setLocalDescription(offer);
-        await pcListener.setRemoteDescription(offer);
-
-        const answer = await pcListener.createAnswer();
-        await pcListener.setLocalDescription(answer);
-        await pcHost.setRemoteDescription(answer);
-      }
+      await Promise.all(
+        hostPCs.map(async (pcHost, i) => {
+          const pcListener = listenerPCs[i];
+          const offer = await pcHost.createOffer();
+          await pcHost.setLocalDescription(offer);
+          await pcListener.setRemoteDescription(offer);
+          const answer = await pcListener.createAnswer();
+          await pcListener.setLocalDescription(answer);
+          await pcHost.setRemoteDescription(answer);
+        })
+      );
 
       const listenerResults = await Promise.all(mediaPromises);
 

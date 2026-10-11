@@ -101,7 +101,7 @@ app.use((request, response, next) => {
 app.get("/api", (_request, response) => {
   response.json({
     product: "TOGETHER",
-    version: "2.6.0",
+    version: "2.7.0",
     status: "running"
   });
 });
@@ -119,7 +119,7 @@ app.get("/api/health", async (_request, response) => {
 
     return response.status(isHealthy ? 200 : 503).json({
       product: "TOGETHER",
-      version: "2.6.0",
+      version: "2.7.0",
       status: isHealthy ? "ok" : "degraded",
       ready: isHealthy,
       uptimeSeconds: Math.floor(process.uptime()),
