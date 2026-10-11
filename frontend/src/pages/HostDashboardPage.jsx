@@ -65,6 +65,7 @@ export default function HostDashboardPage() {
   const chatScrollRef = useRef(null);
   const bgAudioRef = useRef(null);
   const wakeLockRef = useRef(null);
+  const hostKeyRef = useRef(null);
   const roomContainerRef = useRef(null);
   const accumulatedHueRef = useRef(150);
 
@@ -440,6 +441,7 @@ export default function HostDashboardPage() {
         audioSourceMode: "universal"
       });
 
+      hostKeyRef.current = newSession.hostKey;
       setSession(newSession);
 
       // Register session with global context for persistent audio
@@ -493,7 +495,8 @@ export default function HostDashboardPage() {
       socket.on("connect", () => {
         socket.emit("host-created-room", {
           roomId: newSession.roomId,
-          hostId: hostIdRef.current
+          hostId: hostIdRef.current,
+          hostKey: newSession.hostKey
         });
       });
 
@@ -642,14 +645,17 @@ export default function HostDashboardPage() {
 
     if (socketRef.current) {
       if (session?.roomId) {
-        socketRef.current.emit("host-ended-session", { roomId: session.roomId });
+        socketRef.current.emit("host-ended-session", {
+          roomId: session.roomId,
+          hostKey: hostKeyRef.current
+        });
       }
       socketRef.current.disconnect();
       socketRef.current = null;
     }
 
     if (session?.roomId) {
-      endSession(session.roomId).catch(() => {});
+      endSession(session.roomId, hostKeyRef.current).catch(() => {});
     }
 
     setSession(null);
@@ -765,7 +771,7 @@ export default function HostDashboardPage() {
       currentTrack: track
     });
 
-    updateSessionTrack(session.roomId, { currentTrack: track }).catch(() => {});
+    updateSessionTrack(session.roomId, { currentTrack: track }, hostKeyRef.current).catch(() => {});
     setAnnouncedTrack(`${cleanTitle} — ${cleanArtist}`);
   }
 

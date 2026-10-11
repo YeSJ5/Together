@@ -214,17 +214,21 @@ export default function AudioDiagnosticsModal({ isOpen, onClose }) {
           )}
 
           {/* System Environment Check */}
-          <div style={{ display: "flex", flexDirection: "column", gap: "6px", fontSize: "0.82rem", color: "var(--text-secondary)" }}>
+          <div style={{ display: "flex", flexDirection: "column", gap: "8px", fontSize: "0.82rem", color: "var(--text-secondary)", background: "rgba(255,255,255,0.03)", padding: "12px", borderRadius: "10px", border: "1px solid rgba(255,255,255,0.06)" }}>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <span>WebRTC Peer Engine:</span>
-              <span style={{ color: "var(--accent-primary)", fontWeight: 600 }}>Active (Direct UDP / SRTP)</span>
+              <span>WebRTC Transport:</span>
+              <span style={{ color: "var(--accent-primary)", fontWeight: 600 }}>Direct P2P Mesh + TURN Relay</span>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <span>Background Playback API:</span>
-              <span style={{ color: "var(--accent-cyan)", fontWeight: 600 }}>MediaSession & WakeLock Active</span>
+              <span>Background Playback:</span>
+              <span style={{ color: "var(--accent-cyan)", fontWeight: 600 }}>MediaSession Audio Service</span>
             </div>
             <div style={{ display: "flex", justifyContent: "space-between" }}>
-              <span>Browser Speech Engine:</span>
+              <span>Data Persistence:</span>
+              <span style={{ color: "var(--accent-green)", fontWeight: 600 }}>Durable Relational Storage</span>
+            </div>
+            <div style={{ display: "flex", justifyContent: "space-between" }}>
+              <span>Live Speech Transcriptions:</span>
               <span style={{ color: typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition) ? "var(--accent-primary)" : "var(--text-muted)", fontWeight: 600 }}>
                 {typeof window !== "undefined" && (window.SpeechRecognition || window.webkitSpeechRecognition) ? "Supported" : "Not supported in this browser"}
               </span>

@@ -50,13 +50,18 @@ export async function updateSessionSource(roomId, payload) {
   return handleResponse(response);
 }
 
-export async function updateSessionTrack(roomId, payload) {
+export async function updateSessionTrack(roomId, payload, hostKey) {
+  const headers = {
+    "Content-Type": "application/json"
+  };
+  if (hostKey) {
+    headers["x-host-key"] = hostKey;
+  }
+
   const response = await fetch(`${API_BASE_URL}/session/${roomId}/track`, {
     method: "PATCH",
     cache: "no-store",
-    headers: {
-      "Content-Type": "application/json"
-    },
+    headers,
     body: JSON.stringify(payload)
   });
 
@@ -140,10 +145,16 @@ export async function fetchSessionEvents(roomId, clientId, since = 0) {
   return handleResponse(response);
 }
 
-export async function endSession(roomId) {
+export async function endSession(roomId, hostKey) {
+  const headers = {};
+  if (hostKey) {
+    headers["x-host-key"] = hostKey;
+  }
+
   const response = await fetch(`${API_BASE_URL}/session/${roomId}`, {
     method: "DELETE",
-    cache: "no-store"
+    cache: "no-store",
+    headers
   });
 
   return handleResponse(response);

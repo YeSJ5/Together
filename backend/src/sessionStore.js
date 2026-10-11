@@ -1,7 +1,10 @@
+const crypto = require("crypto");
 const { getDatabase } = require("./db/database");
 
 const sessions = new Map();
 const db = getDatabase();
+
+const VALID_CATEGORIES = ["Music", "Podcast", "Study", "Lecture", "DJ", "General"];
 
 // Restore recent active rooms from durable database into memory
 try {
@@ -15,7 +18,8 @@ try {
         isPublic: room.isPublic,
         hostId: room.hostId,
         hostName: room.hostName,
-        users: [], // Presence is transient and re-established via WebRTC / socket connections
+        hostKey: room.hostKey || null,
+        users: [],
         createdAt: room.createdAt,
         status: room.status,
         audioSourceMode: room.audioSourceMode,
@@ -88,13 +92,19 @@ function createSession({
   liveKitRoomName = null
 }) {
   const roomId = generateUniqueRoomId();
+  const sanitizedTitle = String(title || "").trim().slice(0, 100);
+  const sanitizedHostName = String(hostName || "Host").trim().slice(0, 40);
+  const sanitizedCategory = VALID_CATEGORIES.includes(category) ? category : "Music";
+  const hostKey = crypto.randomBytes(24).toString("hex");
+
   const session = {
     roomId,
-    title: title.trim() || `${hostName}'s Room`,
-    category: category || "Music",
+    title: sanitizedTitle || `${sanitizedHostName}'s Room`,
+    category: sanitizedCategory,
     isPublic: Boolean(isPublic),
     hostId,
-    hostName,
+    hostName: sanitizedHostName,
+    hostKey,
     users: [],
     createdAt: Date.now(),
     status: "active",
@@ -111,7 +121,7 @@ function createSession({
 
   try {
     db.upsertRoom(session);
-    db.upsertUserProfile(hostId, hostName, "host");
+    db.upsertUserProfile(hostId, sanitizedHostName, "host");
     db.appendRoomEvent(roomId, "room-created", hostId, null, {
       title: session.title,
       category: session.category
@@ -120,7 +130,10 @@ function createSession({
     console.error("[sessionStore] Database error during createSession:", err.message);
   }
 
-  return sanitizeSession(session);
+  return {
+    ...sanitizeSession(session),
+    hostKey
+  };
 }
 
 function listActivePublicSessions() {
@@ -130,7 +143,6 @@ function listActivePublicSessions() {
       result.push(sanitizeSession(session));
     }
   }
-  // Sort by listeners count desc, then most recent
   return result.sort((a, b) => {
     const diff = (b.users?.length || 0) - (a.users?.length || 0);
     return diff !== 0 ? diff : b.createdAt - a.createdAt;
@@ -143,10 +155,8 @@ function getSession(roomId) {
     return sanitizeSession(inMemory);
   }
 
-  // Fallback to durable storage
   const persisted = db.getRoom(roomId);
   if (persisted && persisted.status === "active") {
-    // Restore to inMemory map
     const restored = {
       ...persisted,
       users: [],
@@ -175,6 +185,19 @@ function getRawSession(roomId) {
     }
   }
   return session;
+}
+
+function verifyHostKey(roomId, candidateKey) {
+  if (!roomId || !candidateKey) return false;
+  const raw = getRawSession(roomId);
+  if (!raw) return false;
+  if (!raw.hostKey) {
+    return raw.hostId === candidateKey;
+  }
+  const expected = Buffer.from(String(raw.hostKey));
+  const candidate = Buffer.from(String(candidateKey));
+  if (expected.length !== candidate.length) return false;
+  return crypto.timingSafeEqual(expected, candidate);
 }
 
 function updateSession(roomId, updater) {
@@ -233,6 +256,7 @@ module.exports = {
   getSession,
   listActivePublicSessions,
   updateSession,
+  verifyHostKey,
   clearAllSessionsForTesting,
   getDatabase: () => db
 };

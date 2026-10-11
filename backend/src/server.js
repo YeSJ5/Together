@@ -9,6 +9,7 @@ const { ALLOWED_ORIGINS, PORT } = require("./config");
 const crypto = require("crypto");
 const logger = require("./logger");
 const { getIceServerConfig } = require("./iceConfig");
+const { createRateLimiter } = require("./rateLimiter");
 const { createLiveKitToken, getLiveKitConfig, getLiveKitRoomName } = require("./livekit");
 const {
   createSession,
@@ -17,7 +18,8 @@ const {
   getRawSession,
   getSession,
   listActivePublicSessions,
-  updateSession
+  updateSession,
+  verifyHostKey
 } = require("./sessionStore");
 
 const app = express();
@@ -95,26 +97,30 @@ app.use((request, response, next) => {
 app.get("/api", (_request, response) => {
   response.json({
     product: "TOGETHER",
-    version: "2.1.0",
+    version: "2.2.0",
     status: "running"
   });
 });
 
-app.get("/api/health", (_request, response) => {
+app.get("/api/health", async (_request, response) => {
   try {
     const db = getDatabase();
+    const dbHealth = await db.checkHealth();
     const dbRooms = db.listPublicActiveRooms();
     const mem = process.memoryUsage();
     const ice = getIceServerConfig();
 
-    return response.json({
+    const isHealthy = dbHealth.healthy !== false;
+
+    return response.status(isHealthy ? 200 : 503).json({
       product: "TOGETHER",
-      version: "2.1.0",
-      status: "ok",
-      ready: true,
+      version: "2.2.0",
+      status: isHealthy ? "ok" : "degraded",
+      ready: isHealthy,
       uptimeSeconds: Math.floor(process.uptime()),
       database: {
-        status: "connected",
+        status: dbHealth.status,
+        driver: dbHealth.driver,
         persistedActiveRooms: dbRooms.length
       },
       metrics: {
@@ -136,7 +142,13 @@ app.get("/api/health", (_request, response) => {
   }
 });
 
-app.get("/api/ice-servers", (request, response) => {
+const iceRateLimiter = createRateLimiter({
+  windowMs: 60000,
+  maxRequests: 60,
+  message: "Too many ICE configuration requests. Please wait."
+});
+
+app.get("/api/ice-servers", iceRateLimiter, (request, response) => {
   const clientId = request.query.clientId || "client";
   const ice = getIceServerConfig({ clientId });
   response.json(ice);
@@ -175,7 +187,13 @@ app.get("/api/rooms", (_request, response) => {
   });
 });
 
-app.post("/create-session", (request, response) => {
+const createSessionRateLimiter = createRateLimiter({
+  windowMs: 600000,
+  maxRequests: 30,
+  message: "Too many rooms created from this IP. Please wait before creating another."
+});
+
+app.post("/create-session", createSessionRateLimiter, (request, response) => {
   const {
     hostId,
     hostName,
@@ -217,11 +235,18 @@ app.post("/create-session", (request, response) => {
 
 app.patch("/session/:id/track", (request, response) => {
   const { currentTrack } = request.body || {};
+  const hostKey = request.headers["x-host-key"] || request.body?.hostKey;
   const session = getRawSession(request.params.id);
 
   if (!session) {
     return response.status(404).json({
       message: "Session not found or expired."
+    });
+  }
+
+  if (!verifyHostKey(request.params.id, hostKey)) {
+    return response.status(403).json({
+      message: "Forbidden: Only the room host can update track metadata."
     });
   }
 
@@ -305,11 +330,18 @@ app.get("/session/:id", (request, response) => {
 
 app.patch("/session/:id/source", (request, response) => {
   const { audioSourceMode } = request.body || {};
+  const hostKey = request.headers["x-host-key"] || request.body?.hostKey;
   const session = getRawSession(request.params.id);
 
   if (!session) {
     return response.status(404).json({
       message: "Session not found or expired."
+    });
+  }
+
+  if (!verifyHostKey(request.params.id, hostKey)) {
+    return response.status(403).json({
+      message: "Forbidden: Only the room host can change audio sources."
     });
   }
 
@@ -465,13 +497,22 @@ app.get("/session/:id/events", (request, response) => {
 });
 
 app.delete("/session/:id", (request, response) => {
-  const session = deleteSession(request.params.id);
+  const hostKey = request.headers["x-host-key"] || request.body?.hostKey || request.query?.hostKey;
+  const rawSession = getRawSession(request.params.id);
 
-  if (!session) {
+  if (!rawSession) {
     return response.status(404).json({
       message: "Session not found or already ended."
     });
   }
+
+  if (!verifyHostKey(request.params.id, hostKey)) {
+    return response.status(403).json({
+      message: "Forbidden: Only the room host can end this session."
+    });
+  }
+
+  const session = deleteSession(request.params.id);
 
   io.to(session.roomId).emit("session-ended", {
     roomId: session.roomId
@@ -543,7 +584,7 @@ function emitUserCount(roomId) {
 const hostDisconnectTimers = new Map();
 
 io.on("connection", (socket) => {
-  socket.on("host-created-room", ({ roomId, hostId }) => {
+  socket.on("host-created-room", ({ roomId, hostId, hostKey }) => {
     if (hostDisconnectTimers.has(roomId)) {
       clearTimeout(hostDisconnectTimers.get(roomId));
       hostDisconnectTimers.delete(roomId);
@@ -559,9 +600,18 @@ io.on("connection", (socket) => {
       return;
     }
 
+    if (session.hostKey && !verifyHostKey(roomId, hostKey)) {
+      socket.emit("room-error", {
+        roomId,
+        message: "Forbidden: Invalid host key."
+      });
+      return;
+    }
+
     socket.data.role = "host";
     socket.data.roomId = roomId;
     socket.data.peerId = hostId;
+    socket.data.isAuthorizedHost = true;
     socket.join(roomId);
 
     updateSession(roomId, (draft) => {
@@ -717,7 +767,15 @@ io.on("connection", (socket) => {
     }
   });
 
-  socket.on("host-ended-session", ({ roomId }) => {
+  socket.on("host-ended-session", ({ roomId, hostKey }) => {
+    if (!socket.data.isAuthorizedHost && !verifyHostKey(roomId, hostKey)) {
+      socket.emit("room-error", {
+        roomId,
+        message: "Forbidden: Unauthorized host action."
+      });
+      return;
+    }
+
     if (hostDisconnectTimers.has(roomId)) {
       clearTimeout(hostDisconnectTimers.get(roomId));
       hostDisconnectTimers.delete(roomId);
