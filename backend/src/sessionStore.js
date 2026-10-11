@@ -2,13 +2,13 @@ const crypto = require("crypto");
 const { getDatabase } = require("./db/database");
 
 const sessions = new Map();
-const db = getDatabase();
+let db = getDatabase();
 
 const VALID_CATEGORIES = ["Music", "Podcast", "Study", "Lecture", "DJ", "General"];
 
 // Restore recent active rooms from durable database into memory (metadata preserved, presence idle until host connects)
 try {
-  const persistedRooms = db.listPublicActiveRooms();
+  const persistedRooms = typeof db.listAllActiveRooms === "function" ? db.listAllActiveRooms() : db.listPublicActiveRooms();
   for (const room of persistedRooms) {
     if (!sessions.has(room.roomId)) {
       sessions.set(room.roomId, {
@@ -327,8 +327,15 @@ function clearAllSessionsForTesting() {
 async function hydrateSessionsFromDatabase() {
   try {
     await db.waitForReady();
-    const persistedRooms = await db.listPublicActiveRoomsAsync();
+    const persistedRooms = typeof db.listAllActiveRoomsAsync === "function"
+      ? await db.listAllActiveRoomsAsync()
+      : await db.listPublicActiveRoomsAsync();
+    const now = Date.now();
     for (const room of persistedRooms) {
+      if (room.status !== "active") continue;
+      // Skip abandoned rooms older than 24 hours
+      if (now - (room.createdAt || 0) > 24 * 60 * 60 * 1000) continue;
+
       if (!sessions.has(room.roomId)) {
         sessions.set(room.roomId, {
           roomId: room.roomId,
@@ -371,5 +378,6 @@ module.exports = {
   setHostConnected,
   clearAllSessionsForTesting,
   hydrateSessionsFromDatabase,
+  setDatabaseForTesting: (customDb) => { db = customDb; },
   getDatabase: () => db
 };

@@ -111,7 +111,7 @@ app.get("/api/health", async (_request, response) => {
   try {
     const db = getDatabase();
     const dbHealth = await db.checkHealth();
-    const dbRooms = await db.listPublicActiveRoomsAsync();
+    const dbRooms = typeof db.listAllActiveRoomsAsync === "function" ? await db.listAllActiveRoomsAsync() : await db.listPublicActiveRoomsAsync();
     const mem = process.memoryUsage();
     const ice = getIceServerConfig();
     const activePublicRooms = await listActivePublicSessionsAsync();
@@ -643,6 +643,17 @@ io.on("connection", (socket) => {
       roomId
     });
     emitUserCount(roomId);
+
+    // If any listeners were already waiting in the room, notify reconnected host so WebRTC can negotiate
+    if (Array.isArray(session.users) && session.users.length > 0) {
+      for (const listener of session.users) {
+        socket.emit("listener-joined-room", {
+          roomId,
+          listenerId: listener.id,
+          username: listener.username || "Listener"
+        });
+      }
+    }
   });
 
   socket.on("listener-joined-room", ({ roomId, listenerId, username }) => {
@@ -895,6 +906,9 @@ server.listen(PORT, "0.0.0.0", async () => {
   try {
     const db = getDatabase();
     await db.waitForReady();
+    if (typeof db.cleanupStaleRooms === "function") {
+      db.cleanupStaleRooms();
+    }
     await hydrateSessionsFromDatabase();
     const health = await db.checkHealth();
     logger.info(`[DB Startup] Selected driver: ${health.driver} | Storage: ${health.storageType} | Status: ${health.status}`, {

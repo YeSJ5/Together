@@ -621,6 +621,56 @@ class TogetherDatabase {
     return this.listPublicActiveRooms();
   }
 
+  listAllActiveRooms() {
+    if (this.isSqlite && this.db) {
+      const rows = this.db.prepare(`
+        SELECT * FROM rooms
+        WHERE status = 'active'
+        ORDER BY created_at DESC
+      `).all();
+      return rows.map((r) => this.formatRoomRow(r));
+    }
+
+    if (this.isPg) {
+      const res = [];
+      for (const r of this.cache.rooms.values()) {
+        if (r.status === "active") {
+          res.push({ ...r });
+        }
+      }
+      return res.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+    }
+
+    const res = [];
+    for (const r of this.jsonStore.rooms.values()) {
+      if (r.status === "active") {
+        res.push({ ...r });
+      }
+    }
+    return res.sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
+  }
+
+  async listAllActiveRoomsAsync() {
+    if (this.isPg && this.pgPool) {
+      await this.waitForReady();
+      try {
+        const res = await this.pgPool.query(
+          "SELECT * FROM rooms WHERE status = 'active' ORDER BY created_at DESC LIMIT 200"
+        );
+        const rooms = (res.rows || []).map((r) => this.formatRoomRow(r));
+        for (const room of rooms) {
+          this.cache.rooms.set(room.roomId, room);
+        }
+        return rooms;
+      } catch (err) {
+        console.warn("[DB PG] listAllActiveRoomsAsync error, falling back to cache:", err.message);
+        return this.listAllActiveRooms();
+      }
+    }
+
+    return this.listAllActiveRooms();
+  }
+
   deleteOrEndRoom(roomId) {
     const now = Date.now();
 
@@ -789,6 +839,13 @@ class TogetherDatabase {
         "UPDATE rooms SET status = 'ended', ended_at = $1, updated_at = $2 WHERE status = 'active' AND created_at < $3",
         [now, now, cutoff]
       ).catch(() => {});
+      for (const room of this.cache.rooms.values()) {
+        if (room.status === "active" && room.createdAt < cutoff) {
+          room.status = "ended";
+          room.endedAt = now;
+          room.updatedAt = now;
+        }
+      }
     }
 
     if (this.isSqlite && this.db) {
@@ -896,11 +953,11 @@ function getDatabase(dbPath) {
   return instance;
 }
 
-function resetDatabaseForTesting() {
+function resetDatabaseForTesting(dbPath = ":memory:") {
   if (instance) {
     instance.close();
   }
-  instance = new TogetherDatabase({ dbPath: ":memory:" });
+  instance = new TogetherDatabase({ dbPath });
   return instance;
 }
 
