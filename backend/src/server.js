@@ -18,11 +18,13 @@ const {
   getRawSession,
   getSession,
   listActivePublicSessions,
+  setHostConnected,
   updateSession,
   verifyHostKey
 } = require("./sessionStore");
 
 const app = express();
+app.set("trust proxy", 1);
 const server = http.createServer(app);
 
 function isOriginAllowed(origin) {
@@ -97,7 +99,7 @@ app.use((request, response, next) => {
 app.get("/api", (_request, response) => {
   response.json({
     product: "TOGETHER",
-    version: "2.2.0",
+    version: "2.3.0",
     status: "running"
   });
 });
@@ -109,22 +111,28 @@ app.get("/api/health", async (_request, response) => {
     const dbRooms = db.listPublicActiveRooms();
     const mem = process.memoryUsage();
     const ice = getIceServerConfig();
+    const activePublicRooms = listActivePublicSessions();
 
     const isHealthy = dbHealth.healthy !== false;
 
     return response.status(isHealthy ? 200 : 503).json({
       product: "TOGETHER",
-      version: "2.2.0",
+      version: "2.3.0",
       status: isHealthy ? "ok" : "degraded",
       ready: isHealthy,
       uptimeSeconds: Math.floor(process.uptime()),
       database: {
         status: dbHealth.status,
         driver: dbHealth.driver,
+        storageType: dbHealth.storageType || "ephemeral-container",
         persistedActiveRooms: dbRooms.length
       },
+      presence: {
+        activeRooms: activePublicRooms.length,
+        connectedSockets: io.engine ? io.engine.clientsCount : 0
+      },
       metrics: {
-        activeRooms: listActivePublicSessions().length,
+        activeRooms: activePublicRooms.length,
         connectedSockets: io.engine ? io.engine.clientsCount : 0,
         memoryRssMb: Math.round(mem.rss / 1024 / 1024),
         heapUsedMb: Math.round(mem.heapUsed / 1024 / 1024)
@@ -358,7 +366,13 @@ app.patch("/session/:id/source", (request, response) => {
   return response.json(updated);
 });
 
-app.post("/session/:id/join", (request, response) => {
+const joinSessionRateLimiter = createRateLimiter({
+  windowMs: 60000,
+  maxRequests: 120,
+  message: "Too many join attempts. Please slow down."
+});
+
+app.post("/session/:id/join", joinSessionRateLimiter, (request, response) => {
   const { listenerId, username } = request.body || {};
   const session = getRawSession(request.params.id);
 
@@ -613,6 +627,7 @@ io.on("connection", (socket) => {
     socket.data.peerId = hostId;
     socket.data.isAuthorizedHost = true;
     socket.join(roomId);
+    setHostConnected(roomId, true);
 
     updateSession(roomId, (draft) => {
       draft.hostId = hostId;
@@ -662,6 +677,9 @@ io.on("connection", (socket) => {
   });
 
   socket.on("signal:offer", ({ roomId, targetListenerId, offer, senderId }) => {
+    if (!socket.data.roomId || socket.data.roomId !== roomId) {
+      return; // Reject cross-room signaling
+    }
     socket.to(roomId).emit("signal:offer", {
       roomId,
       targetListenerId,
@@ -671,6 +689,9 @@ io.on("connection", (socket) => {
   });
 
   socket.on("signal:answer", ({ roomId, targetHostId, answer, senderId }) => {
+    if (!socket.data.roomId || socket.data.roomId !== roomId) {
+      return; // Reject cross-room signaling
+    }
     socket.to(roomId).emit("signal:answer", {
       roomId,
       targetHostId,
@@ -680,6 +701,9 @@ io.on("connection", (socket) => {
   });
 
   socket.on("signal:ice-candidate", ({ roomId, targetId, candidate, senderId }) => {
+    if (!socket.data.roomId || socket.data.roomId !== roomId) {
+      return; // Reject cross-room signaling
+    }
     socket.to(roomId).emit("signal:ice-candidate", {
       roomId,
       targetId,
@@ -689,8 +713,8 @@ io.on("connection", (socket) => {
   });
 
   socket.on("chat-message", ({ roomId, senderId, senderName, message }) => {
-    if (!roomId || !message) {
-      return;
+    if (!socket.data.roomId || socket.data.roomId !== roomId || !message) {
+      return; // Reject cross-room or empty chat
     }
 
     const payload = {
@@ -698,7 +722,7 @@ io.on("connection", (socket) => {
       roomId,
       senderId,
       senderName: senderName || "Participant",
-      message: String(message).trim(),
+      message: String(message).trim().slice(0, 500),
       createdAt: Date.now()
     };
 
@@ -706,8 +730,8 @@ io.on("connection", (socket) => {
   });
 
   socket.on("reaction", ({ roomId, emoji, senderName }) => {
-    if (!roomId || !emoji) {
-      return;
+    if (!socket.data.roomId || socket.data.roomId !== roomId || !emoji) {
+      return; // Reject cross-room or empty reaction
     }
 
     io.to(roomId).emit("reaction", {
@@ -720,8 +744,11 @@ io.on("connection", (socket) => {
   });
 
   socket.on("transcript-chunk", ({ roomId, text, isFinal, senderName }) => {
-    if (!roomId || !text) {
+    if (!socket.data.roomId || socket.data.roomId !== roomId || !text) {
       return;
+    }
+    if (socket.data.role !== "host" || !socket.data.isAuthorizedHost) {
+      return; // Only verified hosts can publish transcript chunks
     }
 
     io.to(roomId).emit("transcript-chunk", {
@@ -735,8 +762,11 @@ io.on("connection", (socket) => {
   });
 
   socket.on("playback-sync", ({ roomId, currentTrack }) => {
-    if (!roomId) {
+    if (!socket.data.roomId || socket.data.roomId !== roomId) {
       return;
+    }
+    if (socket.data.role !== "host" || !socket.data.isAuthorizedHost) {
+      return; // Only verified hosts can sync playback state
     }
 
     updateSession(roomId, (draft) => {
@@ -750,8 +780,11 @@ io.on("connection", (socket) => {
   });
 
   socket.on("listener-left-room", ({ roomId, listenerId }) => {
-    if (!roomId || !listenerId) {
+    if (!socket.data.roomId || socket.data.roomId !== roomId || !listenerId) {
       return;
+    }
+    if (socket.data.peerId !== listenerId && !socket.data.isAuthorizedHost) {
+      return; // Cannot disconnect other peers unless authorized host
     }
 
     const updated = updateSession(roomId, (draft) => {
@@ -768,6 +801,9 @@ io.on("connection", (socket) => {
   });
 
   socket.on("host-ended-session", ({ roomId, hostKey }) => {
+    if (!socket.data.roomId || socket.data.roomId !== roomId) {
+      return;
+    }
     if (!socket.data.isAuthorizedHost && !verifyHostKey(roomId, hostKey)) {
       socket.emit("room-error", {
         roomId,
@@ -800,6 +836,7 @@ io.on("connection", (socket) => {
     }
 
     if (role === "host") {
+      setHostConnected(roomId, false);
       const timer = setTimeout(() => {
         hostDisconnectTimers.delete(roomId);
         const session = deleteSession(roomId);

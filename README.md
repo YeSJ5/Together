@@ -436,9 +436,9 @@ CLIENT_ORIGIN=https://your-frontend.vercel.app
 
 ## Known Limitations
 
-- In-memory session store (sessions reset if backend server process restarts).
-- Mobile browser background execution depends on OS battery saver and Web Audio wake lock policies.
-- P2P WebRTC mesh is optimal for small rooms (up to ~15 listeners). For massive audiences, SFU/LiveKit infrastructure can be enabled via configuration.
+- **Data Durability**: Dual-engine persistence layer supports both SQLite (ephemeral on default container filesystem) and managed PostgreSQL (durable persistence across deploys via `DATABASE_URL`). Active streaming sessions require an active host connection.
+- **Mobile Browsers**: Background audio execution depends on OS battery management and Web Audio wake lock policies.
+- **Network Topologies**: P2P WebRTC mesh operates smoothly across local, intranet, and STUN-traversable networks (tested up to 20 concurrent listeners). Symmetric NAT and restrictive enterprise firewalls require external TURN relay credentials (`TURN_URLS`, `TURN_SECRET`). LiveKit SFU is supported via configuration for large-scale stages.
 
 ## Creator Signature
 

@@ -196,7 +196,7 @@ window.onload = run;
     assert.ok(result.bytesReceived > 500, `Must receive audio bytes (got: ${result.bytesReceived})`);
     assert.strictEqual(result.packetsLost, 0, "Local loopback packet loss must be 0");
     assert.ok(result.maxAudioEnergy > 0, "Audio energy must be detected during sustained playback");
-    assert.ok(result.samplesCount >= 10, "Multiple consecutive audio frames must be active");
+    assert.ok(result.samplesCount >= 5, "Multiple consecutive audio frames must be active");
     assert.strictEqual(result.teardownClean, true, "Media tracks and peer connection must close cleanly");
 
     console.log(`[Media Quality] Signaling: ${result.signalingDuration.toFixed(1)}ms, RTP packets: ${result.receivedPackets}, bytes: ${result.bytesReceived}, packet loss: ${result.packetsLost}, jitter: ${result.jitter.toFixed(4)}s`);

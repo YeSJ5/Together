@@ -12,8 +12,9 @@ function createRateLimiter({
     }
 
     const ip =
+      req.ip ||
       req.headers["x-forwarded-for"]?.split(",")[0]?.trim() ||
-      req.socket.remoteAddress ||
+      req.socket?.remoteAddress ||
       "anonymous";
 
     const key = `${req.baseUrl || ""}${req.path}:${ip}`;

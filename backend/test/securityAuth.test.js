@@ -157,3 +157,76 @@ test("Security & Abuse Controls: Rate limiting triggers 429 when threshold excee
     server.close();
   }
 });
+
+test("Security & Hardening: Malformed/non-string host keys rejected and source updates protected", async () => {
+  const session = createSession({
+    hostId: "host-strict-1",
+    hostName: "Strict Host",
+    title: "Hardened Room",
+    category: "Podcast"
+  });
+
+  const roomId = session.roomId;
+  const validKey = session.hostKey;
+
+  // 1. Non-string candidate keys must fail timingSafeEqual safely without exception
+  assert.strictEqual(verifyHostKey(roomId, null), false);
+  assert.strictEqual(verifyHostKey(roomId, undefined), false);
+  assert.strictEqual(verifyHostKey(roomId, ""), false);
+  assert.strictEqual(verifyHostKey(roomId, "   "), false);
+  assert.strictEqual(verifyHostKey(roomId, 12345), false);
+  assert.strictEqual(verifyHostKey(roomId, {}), false);
+  assert.strictEqual(verifyHostKey(roomId, []), false);
+  assert.strictEqual(verifyHostKey(roomId, { hostKey: validKey }), false);
+
+  // 2. Length mismatch must fail safely
+  assert.strictEqual(verifyHostKey(roomId, validKey.slice(0, 10)), false);
+  assert.strictEqual(verifyHostKey(roomId, validKey + "extra"), false);
+
+  // 3. Exact valid string succeeds
+  assert.strictEqual(verifyHostKey(roomId, validKey), true);
+
+  deleteSession(roomId);
+});
+
+test("Security & Proxy Isolation: Rate limiting discriminates independent client IPs behind reverse proxy", async () => {
+  const app = express();
+  app.set("trust proxy", 1);
+
+  const proxyLimiter = createRateLimiter({
+    windowMs: 5000,
+    maxRequests: 2,
+    message: "Rate limit exceeded"
+  });
+
+  app.get("/proxy-test", proxyLimiter, (req, res) => {
+    res.json({ clientIp: req.ip });
+  });
+
+  const server = http.createServer(app);
+  await new Promise((r) => server.listen(0, r));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  try {
+    const ip1Headers = { "x-test-ratelimit": "true", "x-forwarded-for": "203.0.113.19" };
+    const ip2Headers = { "x-test-ratelimit": "true", "x-forwarded-for": "198.51.100.42" };
+
+    // Client 1 sends 2 requests (exhausts allowance)
+    const r1 = await fetch(`${baseUrl}/proxy-test`, { headers: ip1Headers });
+    assert.strictEqual(r1.status, 200);
+    const r2 = await fetch(`${baseUrl}/proxy-test`, { headers: ip1Headers });
+    assert.strictEqual(r2.status, 200);
+
+    // Client 1 is now throttled
+    const r3 = await fetch(`${baseUrl}/proxy-test`, { headers: ip1Headers });
+    assert.strictEqual(r3.status, 429, "Client 1 must be throttled");
+
+    // Client 2 with different IP behind the proxy is NOT throttled
+    const r4 = await fetch(`${baseUrl}/proxy-test`, { headers: ip2Headers });
+    assert.strictEqual(r4.status, 200, "Client 2 must have an independent rate limit bucket");
+  } finally {
+    server.close();
+  }
+});
+

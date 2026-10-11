@@ -586,15 +586,18 @@ class TogetherDatabase {
         return {
           status: "connected",
           driver: "postgresql",
+          storageType: "managed-cloud",
           healthy: res.rows?.[0]?.alive === 1
         };
       }
 
       if (this.isSqlite && this.db) {
         const res = this.db.prepare("SELECT 1 as alive").get();
+        const isRenderEphemeral = Boolean(process.env.RENDER) && !process.env.TOGETHER_PERSISTENT_DISK;
         return {
           status: "connected",
           driver: "sqlite",
+          storageType: isRenderEphemeral ? "ephemeral-container" : "local-disk",
           healthy: res?.alive === 1
         };
       }
@@ -602,6 +605,7 @@ class TogetherDatabase {
       return {
         status: "connected",
         driver: "json-journal",
+        storageType: "ephemeral-journal",
         healthy: true
       };
     } catch (err) {

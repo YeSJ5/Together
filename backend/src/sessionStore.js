@@ -6,7 +6,7 @@ const db = getDatabase();
 
 const VALID_CATEGORIES = ["Music", "Podcast", "Study", "Lecture", "DJ", "General"];
 
-// Restore recent active rooms from durable database into memory
+// Restore recent active rooms from durable database into memory (metadata preserved, presence idle until host connects)
 try {
   const persistedRooms = db.listPublicActiveRooms();
   for (const room of persistedRooms) {
@@ -28,7 +28,9 @@ try {
         liveKitRoomName: room.liveKitRoomName,
         currentTrack: room.currentTrack,
         events: [],
-        nextEventId: 1
+        nextEventId: 1,
+        hostConnected: false,
+        restoredFromDb: true
       });
     }
   }
@@ -114,7 +116,9 @@ function createSession({
     liveKitRoomName,
     currentTrack: null,
     events: [],
-    nextEventId: 1
+    nextEventId: 1,
+    hostConnected: true,
+    restoredFromDb: false
   };
 
   sessions.set(roomId, session);
@@ -136,10 +140,21 @@ function createSession({
   };
 }
 
+function setHostConnected(roomId, isConnected) {
+  const session = sessions.get(roomId);
+  if (session) {
+    session.hostConnected = Boolean(isConnected);
+  }
+}
+
 function listActivePublicSessions() {
   const result = [];
+  const now = Date.now();
   for (const session of sessions.values()) {
-    if (session.status === "active" && session.isPublic !== false) {
+    const isLive = session.status === "active" &&
+      session.isPublic !== false &&
+      (session.hostConnected === true || (!session.restoredFromDb && now - session.createdAt < 60000));
+    if (isLive) {
       result.push(sanitizeSession(session));
     }
   }
@@ -161,7 +176,9 @@ function getSession(roomId) {
       ...persisted,
       users: [],
       events: [],
-      nextEventId: 1
+      nextEventId: 1,
+      hostConnected: false,
+      restoredFromDb: true
     };
     sessions.set(roomId, restored);
     return sanitizeSession(restored);
@@ -179,7 +196,9 @@ function getRawSession(roomId) {
         ...persisted,
         users: [],
         events: [],
-        nextEventId: 1
+        nextEventId: 1,
+        hostConnected: false,
+        restoredFromDb: true
       };
       sessions.set(roomId, session);
     }
@@ -188,7 +207,7 @@ function getRawSession(roomId) {
 }
 
 function verifyHostKey(roomId, candidateKey) {
-  if (!roomId || !candidateKey) return false;
+  if (!roomId || typeof candidateKey !== "string" || !candidateKey.trim()) return false;
   const raw = getRawSession(roomId);
   if (!raw) return false;
   if (!raw.hostKey) {
@@ -257,6 +276,7 @@ module.exports = {
   listActivePublicSessions,
   updateSession,
   verifyHostKey,
+  setHostConnected,
   clearAllSessionsForTesting,
   getDatabase: () => db
 };

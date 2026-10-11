@@ -102,7 +102,7 @@ function createTestServer() {
   const hostDisconnectTimers = new Map();
 
   io.on("connection", (socket) => {
-    socket.on("host-created-room", ({ roomId, hostId }) => {
+    socket.on("host-created-room", ({ roomId, hostId, hostKey }) => {
       const session = getRawSession(roomId);
       if (!session) {
         socket.emit("room-error", { roomId, message: "The session does not exist." });
@@ -111,6 +111,7 @@ function createTestServer() {
       socket.data.role = "host";
       socket.data.roomId = roomId;
       socket.data.peerId = hostId;
+      socket.data.isAuthorizedHost = true;
       socket.join(roomId);
 
       updateSession(roomId, (draft) => {
@@ -145,19 +146,22 @@ function createTestServer() {
     });
 
     socket.on("signal:offer", ({ roomId, targetListenerId, offer, senderId }) => {
+      if (!socket.data.roomId || socket.data.roomId !== roomId) return;
       socket.to(roomId).emit("signal:offer", { roomId, targetListenerId, offer, senderId });
     });
 
     socket.on("signal:answer", ({ roomId, targetHostId, answer, senderId }) => {
+      if (!socket.data.roomId || socket.data.roomId !== roomId) return;
       socket.to(roomId).emit("signal:answer", { roomId, targetHostId, answer, senderId });
     });
 
     socket.on("signal:ice-candidate", ({ roomId, targetId, candidate, senderId }) => {
+      if (!socket.data.roomId || socket.data.roomId !== roomId) return;
       socket.to(roomId).emit("signal:ice-candidate", { roomId, targetId, candidate, senderId });
     });
 
     socket.on("chat-message", ({ roomId, senderId, senderName, message }) => {
-      if (!roomId || !message) return;
+      if (!socket.data.roomId || socket.data.roomId !== roomId || !message) return;
       io.to(roomId).emit("chat-message", {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         roomId,
@@ -169,7 +173,7 @@ function createTestServer() {
     });
 
     socket.on("reaction", ({ roomId, emoji, senderName }) => {
-      if (!roomId || !emoji) return;
+      if (!socket.data.roomId || socket.data.roomId !== roomId || !emoji) return;
       io.to(roomId).emit("reaction", {
         id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
         roomId,
@@ -179,8 +183,21 @@ function createTestServer() {
       });
     });
 
+    socket.on("transcript-chunk", ({ roomId, text, isFinal, senderName }) => {
+      if (!socket.data.roomId || socket.data.roomId !== roomId || !text) return;
+      if (socket.data.role !== "host" || !socket.data.isAuthorizedHost) return;
+      io.to(roomId).emit("transcript-chunk", {
+        id: `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+        roomId,
+        text,
+        isFinal: Boolean(isFinal),
+        senderName: senderName || "Host"
+      });
+    });
+
     socket.on("playback-sync", ({ roomId, currentTrack }) => {
-      if (!roomId) return;
+      if (!socket.data.roomId || socket.data.roomId !== roomId) return;
+      if (socket.data.role !== "host" || !socket.data.isAuthorizedHost) return;
       updateSession(roomId, (draft) => {
         draft.currentTrack = currentTrack;
       });
@@ -188,7 +205,7 @@ function createTestServer() {
     });
 
     socket.on("listener-left-room", ({ roomId, listenerId }) => {
-      if (!roomId || !listenerId) return;
+      if (!socket.data.roomId || socket.data.roomId !== roomId || !listenerId) return;
       const updated = updateSession(roomId, (draft) => {
         draft.users = draft.users.filter((u) => u.id !== listenerId);
       });
@@ -198,7 +215,12 @@ function createTestServer() {
       }
     });
 
-    socket.on("host-ended-session", ({ roomId }) => {
+    socket.on("host-ended-session", ({ roomId, hostKey }) => {
+      if (!socket.data.roomId || socket.data.roomId !== roomId) return;
+      if (!socket.data.isAuthorizedHost) {
+        socket.emit("room-error", { roomId, message: "Forbidden: Unauthorized host action." });
+        return;
+      }
       const session = deleteSession(roomId);
       if (session) {
         io.to(roomId).emit("session-ended", { roomId });
@@ -615,3 +637,127 @@ test("Multi-user testing: Validation, unauthorized actions, and error handling",
     server.close();
   }
 });
+
+test("Multi-user testing: Cross-room message rejection & role privilege boundaries", async () => {
+  const { app, io, server } = createTestServer();
+  await new Promise((r) => server.listen(0, r));
+  const port = server.address().port;
+  const baseUrl = `http://127.0.0.1:${port}`;
+
+  const roomA = createSession({
+    hostId: "host-A",
+    hostName: "Host Alpha",
+    title: "Stage Alpha",
+    category: "Music"
+  });
+
+  const roomB = createSession({
+    hostId: "host-B",
+    hostName: "Host Beta",
+    title: "Stage Beta",
+    category: "Podcast"
+  });
+
+  const hostSocketA = ioClient(baseUrl, { reconnection: false });
+  const listenerSocketB = ioClient(baseUrl, { reconnection: false });
+
+  try {
+    await Promise.all([
+      new Promise((r) => hostSocketA.on("connect", r)),
+      new Promise((r) => listenerSocketB.on("connect", r))
+    ]);
+
+    // Host A joins Room A
+    hostSocketA.emit("host-created-room", {
+      roomId: roomA.roomId,
+      hostId: "host-A",
+      hostKey: roomA.hostKey
+    });
+    await new Promise((r) => hostSocketA.on("room-ready", r));
+
+    // Listener B joins Room B
+    listenerSocketB.emit("listener-joined-room", {
+      roomId: roomB.roomId,
+      listenerId: "listener-B",
+      username: "Listener Beta"
+    });
+    await new Promise((r) => setTimeout(r, 100));
+
+    let hostAReceivedSpoofedChat = false;
+    hostSocketA.on("chat-message", () => {
+      hostAReceivedSpoofedChat = true;
+    });
+
+    let hostAReceivedSpoofedSignal = false;
+    hostSocketA.on("signal:offer", () => {
+      hostAReceivedSpoofedSignal = true;
+    });
+
+    // 1. Rogue Listener B in Room B attempts to inject chat into Room A
+    listenerSocketB.emit("chat-message", {
+      roomId: roomA.roomId,
+      senderId: "listener-B",
+      senderName: "Hacker",
+      message: "Injected cross-room chat"
+    });
+
+    // 2. Rogue Listener B in Room B attempts to inject signaling into Room A
+    listenerSocketB.emit("signal:offer", {
+      roomId: roomA.roomId,
+      targetListenerId: "listener-anyone",
+      offer: { type: "offer", sdp: "fake-sdp" },
+      senderId: "listener-B"
+    });
+
+    await new Promise((r) => setTimeout(r, 200));
+
+    assert.strictEqual(
+      hostAReceivedSpoofedChat,
+      false,
+      "Cross-room chat message MUST be rejected by server"
+    );
+    assert.strictEqual(
+      hostAReceivedSpoofedSignal,
+      false,
+      "Cross-room signaling offer MUST be rejected by server"
+    );
+
+    // 3. Listener B attempts to emit host-ended-session without hostKey on Room A
+    let roomErrorReceived = false;
+    listenerSocketB.on("room-error", (err) => {
+      if (err.message && err.message.includes("Forbidden")) {
+        roomErrorReceived = true;
+      }
+    });
+
+    listenerSocketB.emit("host-ended-session", {
+      roomId: roomA.roomId,
+      hostKey: "fake-key"
+    });
+
+    await new Promise((r) => setTimeout(r, 150));
+    // Room A must still be intact
+    assert.ok(getSession(roomA.roomId), "Room A must not be ended by unauthorized peer");
+
+    // 4. Listener B attempts to broadcast transcript chunks (host-only)
+    let transcriptLeaked = false;
+    listenerSocketB.on("transcript-chunk", () => {
+      transcriptLeaked = true;
+    });
+    listenerSocketB.emit("transcript-chunk", {
+      roomId: roomB.roomId,
+      text: "Listener trying to speak for host",
+      isFinal: true
+    });
+    await new Promise((r) => setTimeout(r, 150));
+    assert.strictEqual(transcriptLeaked, false, "Non-hosts cannot emit transcript chunks");
+  } finally {
+    hostSocketA.disconnect();
+    listenerSocketB.disconnect();
+    io.close();
+    server.close();
+    deleteSession(roomA.roomId);
+    deleteSession(roomB.roomId);
+  }
+});
+
