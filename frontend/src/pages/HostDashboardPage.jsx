@@ -65,6 +65,7 @@ export default function HostDashboardPage() {
   const hostIdRef = useRef(createAppId("host"));
   const socketRef = useRef(null);
   const peerConnectionsRef = useRef(new Map());
+  const hostCandidateQueuesRef = useRef(new Map());
   const chatScrollRef = useRef(null);
   const bgAudioRef = useRef(null);
   const wakeLockRef = useRef(null);
@@ -628,18 +629,35 @@ export default function HostDashboardPage() {
         if (pc && data.answer) {
           try {
             await pc.setRemoteDescription(new RTCSessionDescription(data.answer));
+            const queued = hostCandidateQueuesRef.current.get(data.senderId);
+            if (Array.isArray(queued)) {
+              while (queued.length > 0) {
+                const candidate = queued.shift();
+                try {
+                  await pc.addIceCandidate(new RTCIceCandidate(candidate));
+                } catch (_) {}
+              }
+            }
           } catch (_err) {}
         }
       });
 
-      // Handle ICE candidates from listener
+      // Handle ICE candidates from listener (with candidate queuing)
       socket.on("signal:ice-candidate", async (data) => {
         const pc = peerConnectionsRef.current.get(data.senderId);
-        if (pc && data.candidate) {
-          try {
-            await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
-          } catch (_err) {}
+        if (!pc || !data.candidate) return;
+
+        if (!pc.remoteDescription) {
+          if (!hostCandidateQueuesRef.current.has(data.senderId)) {
+            hostCandidateQueuesRef.current.set(data.senderId, []);
+          }
+          hostCandidateQueuesRef.current.get(data.senderId).push(data.candidate);
+          return;
         }
+
+        try {
+          await pc.addIceCandidate(new RTCIceCandidate(data.candidate));
+        } catch (_err) {}
       });
 
       // Handle listener disconnect
@@ -649,6 +667,7 @@ export default function HostDashboardPage() {
           pc.close();
           peerConnectionsRef.current.delete(data.listenerId);
         }
+        hostCandidateQueuesRef.current.delete(data.listenerId);
       });
 
       // Handle chat messages

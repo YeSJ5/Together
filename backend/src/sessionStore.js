@@ -78,7 +78,8 @@ function sanitizeSession(session) {
     mediaBackend: session.mediaBackend,
     nativeMobileRecommended: session.nativeMobileRecommended,
     liveKitRoomName: session.liveKitRoomName || null,
-    currentTrack: session.currentTrack || null
+    currentTrack: session.currentTrack || null,
+    hostConnected: Boolean(session.hostConnected)
   };
 }
 

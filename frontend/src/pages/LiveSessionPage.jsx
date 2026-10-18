@@ -34,6 +34,9 @@ export default function LiveSessionPage() {
   });
 
   const [sessionData, setSessionData] = useState(null);
+  // Connection state machine: "connecting" | "joining" | "waiting-host" | "connecting-audio" | "playing" | "reconnecting" | "failed"
+  const [connectionStatus, setConnectionStatus] = useState("connecting");
+  const [statusMessage, setStatusMessage] = useState("Connecting to broadcast stage...");
   const [isConnected, setIsConnected] = useState(false);
   const [isPlaying, setIsPlaying] = useState(false);
   const [needsGesture, setNeedsGesture] = useState(false);
@@ -51,15 +54,22 @@ export default function LiveSessionPage() {
   const [chatMessages, setChatMessages] = useState([]);
   const [chatInput, setChatInput] = useState("");
   const [audioLevel, setAudioLevel] = useState(0);
+  const [reconnectEpoch, setReconnectEpoch] = useState(0);
 
   const socketRef = useRef(null);
   const peerConnectionRef = useRef(null);
+  const candidateQueueRef = useRef([]);
   const audioContextRef = useRef(null);
   const analyserRef = useRef(null);
   const animFrameRef = useRef(null);
   const chatScrollRef = useRef(null);
   const roomContainerRef = useRef(null);
   const accumulatedHueRef = useRef(150);
+
+  const connectTimerRef = useRef(null);
+  const joinTimerRef = useRef(null);
+  const negotiationTimerRef = useRef(null);
+  const retryCountRef = useRef(0);
 
   // Auto-scroll chat
   useEffect(() => {
@@ -68,8 +78,51 @@ export default function LiveSessionPage() {
     }
   }, [chatMessages]);
 
+  function clearAllTimers() {
+    if (connectTimerRef.current) {
+      clearTimeout(connectTimerRef.current);
+      connectTimerRef.current = null;
+    }
+    if (joinTimerRef.current) {
+      clearTimeout(joinTimerRef.current);
+      joinTimerRef.current = null;
+    }
+    if (negotiationTimerRef.current) {
+      clearTimeout(negotiationTimerRef.current);
+      negotiationTimerRef.current = null;
+    }
+  }
+
+  function handleNegotiationTimeout() {
+    if (retryCountRef.current < 3) {
+      retryCountRef.current += 1;
+      const delay = retryCountRef.current * 1500;
+      setConnectionStatus("reconnecting");
+      setStatusMessage(`Audio connection taking longer than expected. Retrying (${retryCountRef.current}/3)...`);
+      if (peerConnectionRef.current) {
+        peerConnectionRef.current.close();
+        peerConnectionRef.current = null;
+      }
+      candidateQueueRef.current = [];
+      setTimeout(() => {
+        if (socketRef.current && socketRef.current.connected) {
+          socketRef.current.emit("listener-joined-room", {
+            roomId: normalizedRoomId,
+            listenerId,
+            username
+          });
+        }
+      }, delay);
+    } else {
+      setConnectionStatus("failed");
+      setStatusMessage("Unable to establish live audio stream with host. Tap below to retry.");
+    }
+  }
+
   useEffect(() => {
     let isCancelled = false;
+    clearAllTimers();
+    candidateQueueRef.current = [];
 
     // Dynamically resolve ICE servers (STUN + TURN) ahead of time
     getDynamicIceServers().catch(() => {});
@@ -77,44 +130,52 @@ export default function LiveSessionPage() {
     // Verify session initially
     setConnectionError(null);
     setIsVerifying(true);
+    setConnectionStatus("connecting");
+    setStatusMessage("Verifying broadcast station...");
+
     fetchSession(normalizedRoomId)
       .then((data) => {
-        if (!isCancelled) {
-          setSessionData(data);
-          setListenerCount((data.users?.length || 0) + 1);
-          if (data.currentTrack) setCurrentTrack(data.currentTrack);
+        if (isCancelled) return;
+        setSessionData(data);
+        setListenerCount((data.users?.length || 0) + 1);
+        if (data.currentTrack) setCurrentTrack(data.currentTrack);
 
-          registerActiveSession({
-            roomId: normalizedRoomId,
-            userRole: "listener",
-            title: data.title || `${data.hostName}'s Room`,
-            host: data.hostName,
-            cat: data.category,
-            socket: null,
-            cleanup: teardownPlayback
-          });
+        registerActiveSession({
+          roomId: normalizedRoomId,
+          userRole: "listener",
+          title: data.title || `${data.hostName}'s Room`,
+          host: data.hostName,
+          cat: data.category,
+          socket: null,
+          cleanup: teardownPlayback
+        });
 
-          try {
-            const prev = JSON.parse(localStorage.getItem("together-recent-rooms") || "[]");
-            const filtered = prev.filter((r) => r.roomId !== normalizedRoomId);
-            filtered.unshift({
-              roomId: normalizedRoomId,
-              title: data.title || `${data.hostName}'s Room`,
-              hostName: data.hostName,
-              category: data.category || "Music"
-            });
-            localStorage.setItem("together-recent-rooms", JSON.stringify(filtered.slice(0, 8)));
-          } catch (_e) {}
+        if (data.hostConnected === false) {
+          setConnectionStatus("waiting-host");
+          setStatusMessage("Host is currently away. Station will start automatically when host broadcasts.");
         }
+
+        try {
+          const prev = JSON.parse(localStorage.getItem("together-recent-rooms") || "[]");
+          const filtered = prev.filter((r) => r.roomId !== normalizedRoomId);
+          filtered.unshift({
+            roomId: normalizedRoomId,
+            title: data.title || `${data.hostName}'s Room`,
+            hostName: data.hostName,
+            category: data.category || "Music"
+          });
+          localStorage.setItem("together-recent-rooms", JSON.stringify(filtered.slice(0, 8)));
+        } catch (_e) {}
       })
       .catch((err) => {
-        if (!isCancelled) {
-          if (err.status === 404) {
-            setSessionEnded(true);
-            setEndReason("This session does not exist or has expired.");
-          } else {
-            setConnectionError(err.message || "Could not reach session. The server may be starting up.");
-          }
+        if (isCancelled) return;
+        if (err.status === 404) {
+          setSessionEnded(true);
+          setEndReason("This session does not exist or has expired.");
+        } else {
+          setConnectionError(err.message || "Could not reach session. The server may be starting up.");
+          setConnectionStatus("failed");
+          setStatusMessage("Station lookup timed out. Tap retry to reconnect.");
         }
       })
       .finally(() => {
@@ -127,12 +188,82 @@ export default function LiveSessionPage() {
     const socket = createSocket();
     socketRef.current = socket;
 
+    // Bounded socket connection timeout (10 seconds)
+    connectTimerRef.current = setTimeout(() => {
+      if (!socket.connected && !isCancelled) {
+        setConnectionStatus("failed");
+        setStatusMessage("Could not connect to streaming server. Check your connection or tap to retry.");
+      }
+    }, 10000);
+
     socket.on("connect", () => {
+      if (connectTimerRef.current) {
+        clearTimeout(connectTimerRef.current);
+        connectTimerRef.current = null;
+      }
+      setConnectionStatus("joining");
+      setStatusMessage("Joining broadcast room...");
+
       socket.emit("listener-joined-room", {
         roomId: normalizedRoomId,
         listenerId,
         username
       });
+
+      // Bounded join acknowledgment timeout (7 seconds)
+      joinTimerRef.current = setTimeout(() => {
+        if (socket.connected && connectionStatus === "joining" && !isCancelled) {
+          socket.emit("listener-joined-room", {
+            roomId: normalizedRoomId,
+            listenerId,
+            username
+          });
+        }
+      }, 7000);
+    });
+
+    socket.on("room-joined", (data) => {
+      if (joinTimerRef.current) {
+        clearTimeout(joinTimerRef.current);
+        joinTimerRef.current = null;
+      }
+
+      if (!data.hostConnected) {
+        setConnectionStatus("waiting-host");
+        setStatusMessage("Host is currently away or not broadcasting yet.");
+      } else {
+        setConnectionStatus("joining");
+        setStatusMessage("Stage joined. Requesting live audio stream...");
+        // Set bounded audio negotiation timeout
+        negotiationTimerRef.current = setTimeout(() => {
+          if (!isConnected && !isCancelled) {
+            handleNegotiationTimeout();
+          }
+        }, 12000);
+      }
+    });
+
+    socket.on("host-connected", () => {
+      clearAllTimers();
+      setConnectionStatus("joining");
+      setStatusMessage("Host is live! Requesting audio stream...");
+      socket.emit("listener-joined-room", {
+        roomId: normalizedRoomId,
+        listenerId,
+        username
+      });
+    });
+
+    socket.on("host-disconnected", (data) => {
+      clearAllTimers();
+      setConnectionStatus("waiting-host");
+      setStatusMessage(data?.reason || "Host temporarily disconnected.");
+      if (peerConnectionRef.current) {
+        peerConnectionRef.current.close();
+        peerConnectionRef.current = null;
+      }
+      candidateQueueRef.current = [];
+      setIsConnected(false);
     });
 
     socket.on("user-count-updated", (data) => {
@@ -146,9 +277,18 @@ export default function LiveSessionPage() {
         return;
       }
 
+      if (negotiationTimerRef.current) {
+        clearTimeout(negotiationTimerRef.current);
+        negotiationTimerRef.current = null;
+      }
+
+      setConnectionStatus("connecting-audio");
+      setStatusMessage("Audio offer received. Negotiating media connection...");
+
       try {
         if (peerConnectionRef.current) {
           peerConnectionRef.current.close();
+          peerConnectionRef.current = null;
         }
 
         const pc = createPeerConnection({
@@ -166,22 +306,31 @@ export default function LiveSessionPage() {
           onConnectionStateChange: (state) => {
             if (state === "connected") {
               setIsConnected(true);
-            } else if (state === "disconnected" || state === "failed") {
+              retryCountRef.current = 0;
+              setConnectionStatus("playing");
+              setStatusMessage("Live Audio Streaming");
+            } else if (state === "disconnected") {
               setIsConnected(false);
-              if (state === "failed" && socketRef.current && socketRef.current.connected) {
-                // Request fresh negotiation from host
-                socketRef.current.emit("listener-joined-room", {
-                  roomId: normalizedRoomId,
-                  listenerId,
-                  username
-                });
-              }
+              setConnectionStatus("reconnecting");
+              setStatusMessage("Audio stream interrupted. Reconnecting...");
+            } else if (state === "failed") {
+              setIsConnected(false);
+              handleNegotiationTimeout();
             }
           }
         });
 
         peerConnectionRef.current = pc;
         await pc.setRemoteDescription(new RTCSessionDescription(data.offer));
+
+        // Drain any ICE candidates that arrived before setRemoteDescription completed
+        const queue = candidateQueueRef.current;
+        candidateQueueRef.current = [];
+        for (const candidate of queue) {
+          try {
+            await pc.addIceCandidate(new RTCIceCandidate(candidate));
+          } catch (_candidateErr) {}
+        }
 
         const answer = await pc.createAnswer();
         await pc.setLocalDescription(answer);
@@ -193,19 +342,50 @@ export default function LiveSessionPage() {
           senderId: listenerId
         });
       } catch (_err) {
-        // Connection negotiation error
+        handleNegotiationTimeout();
       }
     });
 
+    // Handle ICE candidates from host (with candidate queueing)
     socket.on("signal:ice-candidate", async (data) => {
       if (data.targetId && data.targetId !== listenerId) {
         return;
       }
-      if (peerConnectionRef.current && data.candidate) {
-        try {
-          await peerConnectionRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
-        } catch (_err) {}
+      const candidate = data.candidate;
+      if (!candidate) return;
+
+      const pc = peerConnectionRef.current;
+      if (!pc || !pc.remoteDescription) {
+        candidateQueueRef.current.push(candidate);
+        return;
       }
+
+      try {
+        await pc.addIceCandidate(new RTCIceCandidate(candidate));
+      } catch (_err) {}
+    });
+
+    socket.on("room-error", (data) => {
+      clearAllTimers();
+      setSessionEnded(true);
+      setEndReason(data.message || "Invalid room or session expired.");
+      teardownPlayback();
+    });
+
+    socket.on("connect_error", () => {
+      setConnectionStatus("reconnecting");
+      setStatusMessage("Server link interrupted. Reconnecting...");
+    });
+
+    socket.on("disconnect", () => {
+      setConnectionStatus("reconnecting");
+      setStatusMessage("Disconnected from room. Reconnecting...");
+      if (peerConnectionRef.current) {
+        peerConnectionRef.current.close();
+        peerConnectionRef.current = null;
+      }
+      candidateQueueRef.current = [];
+      setIsConnected(false);
     });
 
     socket.on("chat-message", (msg) => {
@@ -228,6 +408,7 @@ export default function LiveSessionPage() {
     });
 
     socket.on("session-ended", (data) => {
+      clearAllTimers();
       setSessionEnded(true);
       setEndReason(data.reason || "The host ended the session.");
       teardownPlayback();
@@ -235,16 +416,18 @@ export default function LiveSessionPage() {
 
     return () => {
       isCancelled = true;
+      clearAllTimers();
       if (socketRef.current) {
         socketRef.current.emit("listener-left-room", {
           roomId: normalizedRoomId,
           listenerId
         });
         socketRef.current.disconnect();
+        socketRef.current = null;
       }
       teardownPlayback();
     };
-  }, [normalizedRoomId, listenerId, username]);
+  }, [normalizedRoomId, listenerId, username, reconnectEpoch]);
 
   function configureMediaSession() {
     if ("mediaSession" in navigator) {
@@ -384,6 +567,7 @@ export default function LiveSessionPage() {
   }
 
   function teardownPlayback() {
+    clearAllTimers();
     if (animFrameRef.current) {
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = null;
@@ -396,6 +580,7 @@ export default function LiveSessionPage() {
       peerConnectionRef.current.close();
       peerConnectionRef.current = null;
     }
+    candidateQueueRef.current = [];
     if (persistentAudioRef.current) {
       persistentAudioRef.current.pause();
       persistentAudioRef.current.srcObject = null;
@@ -411,6 +596,13 @@ export default function LiveSessionPage() {
     leaveActiveSession();
     setIsConnected(false);
     setIsPlaying(false);
+  }
+
+  function handleManualRetry() {
+    setConnectionError(null);
+    setSessionEnded(false);
+    retryCountRef.current = 0;
+    setReconnectEpoch((n) => n + 1);
   }
 
   function handleSendReaction(emoji) {
@@ -499,20 +691,7 @@ export default function LiveSessionPage() {
               <button
                 type="button"
                 className="button-primary"
-                onClick={() => {
-                  setConnectionError(null);
-                  setIsVerifying(true);
-                  fetchSession(normalizedRoomId)
-                    .then((data) => {
-                      setSessionData(data);
-                      setListenerCount((data.users?.length || 0) + 1);
-                      if (data.currentTrack) setCurrentTrack(data.currentTrack);
-                    })
-                    .catch((err) => {
-                      setConnectionError(err.message || "Failed to reach session.");
-                    })
-                    .finally(() => setIsVerifying(false));
-                }}
+                onClick={handleManualRetry}
               >
                 🔄 Retry Connection
               </button>
@@ -541,24 +720,72 @@ export default function LiveSessionPage() {
                 <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", marginBottom: "20px" }}>
                   <div>
                     <div style={{ display: "flex", alignItems: "center", gap: "8px", marginBottom: "4px" }}>
-                      <span className="live-pill" style={{
-                        display: "inline-flex",
-                        alignItems: "center",
-                        gap: "6px",
-                        background: isConnected ? "rgba(46, 204, 113, 0.15)" : "rgba(243, 156, 18, 0.15)",
-                        color: isConnected ? "#27ae60" : "#d35400",
-                        padding: "4px 10px",
-                        borderRadius: "999px",
-                        fontSize: "0.82rem",
-                        fontWeight: 700
-                      }}>
-                        <span style={{
-                          width: "8px",
-                          height: "8px",
-                          borderRadius: "50%",
-                          background: isConnected ? "#2ecc71" : "#f39c12"
-                        }} />
-                        {isConnected ? "LIVE AUDIO" : "CONNECTING..."}
+                      <span
+                        className="live-pill"
+                        style={{
+                          display: "inline-flex",
+                          alignItems: "center",
+                          gap: "6px",
+                          background:
+                            connectionStatus === "playing"
+                              ? "rgba(46, 204, 113, 0.15)"
+                              : connectionStatus === "waiting-host"
+                              ? "rgba(243, 156, 18, 0.15)"
+                              : connectionStatus === "connecting-audio"
+                              ? "rgba(6, 182, 212, 0.15)"
+                              : connectionStatus === "reconnecting"
+                              ? "rgba(243, 156, 18, 0.15)"
+                              : connectionStatus === "failed"
+                              ? "rgba(239, 68, 68, 0.15)"
+                              : "rgba(243, 156, 18, 0.15)",
+                          color:
+                            connectionStatus === "playing"
+                              ? "#27ae60"
+                              : connectionStatus === "waiting-host"
+                              ? "#d35400"
+                              : connectionStatus === "connecting-audio"
+                              ? "var(--accent-cyan)"
+                              : connectionStatus === "reconnecting"
+                              ? "#d35400"
+                              : connectionStatus === "failed"
+                              ? "#ef4444"
+                              : "#d35400",
+                          padding: "4px 10px",
+                          borderRadius: "999px",
+                          fontSize: "0.82rem",
+                          fontWeight: 700
+                        }}
+                      >
+                        <span
+                          style={{
+                            width: "8px",
+                            height: "8px",
+                            borderRadius: "50%",
+                            background:
+                              connectionStatus === "playing"
+                                ? "#2ecc71"
+                                : connectionStatus === "waiting-host"
+                                ? "#f39c12"
+                                : connectionStatus === "connecting-audio"
+                                ? "var(--accent-cyan)"
+                                : connectionStatus === "reconnecting"
+                                ? "#f39c12"
+                                : connectionStatus === "failed"
+                                ? "#ef4444"
+                                : "#f39c12"
+                          }}
+                        />
+                        {connectionStatus === "playing"
+                          ? "LIVE AUDIO"
+                          : connectionStatus === "waiting-host"
+                          ? "HOST AWAY"
+                          : connectionStatus === "connecting-audio"
+                          ? "CONNECTING AUDIO..."
+                          : connectionStatus === "reconnecting"
+                          ? "RECONNECTING..."
+                          : connectionStatus === "failed"
+                          ? "CONNECTION FAILED"
+                          : "CONNECTING..."}
                       </span>
                       <span className="subtle-text" style={{ fontSize: "0.85rem" }}>
                         {normalizedRoomId}
@@ -604,6 +831,81 @@ export default function LiveSessionPage() {
                     </button>
                   </div>
                 </div>
+
+                {/* Status Notice Banner (Waiting for host or failure) */}
+                {connectionStatus === "waiting-host" && (
+                  <div
+                    style={{
+                      background: "rgba(243, 156, 18, 0.08)",
+                      border: "1px solid rgba(243, 156, 18, 0.3)",
+                      padding: "14px 18px",
+                      borderRadius: "var(--radius-control)",
+                      marginBottom: "16px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "12px",
+                      flexWrap: "wrap"
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <span style={{ fontSize: "1.3rem" }}>🎙️</span>
+                      <div>
+                        <strong style={{ display: "block", color: "var(--text-main)", fontSize: "0.92rem" }}>
+                          Host is not broadcasting yet
+                        </strong>
+                        <span className="subtle-text" style={{ fontSize: "0.78rem" }}>
+                          Audio will connect automatically when {sessionData?.hostName || "the host"} goes live.
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="button-secondary"
+                      onClick={handleManualRetry}
+                      style={{ fontSize: "0.8rem", padding: "6px 14px" }}
+                    >
+                      🔄 Check Station
+                    </button>
+                  </div>
+                )}
+
+                {connectionStatus === "failed" && (
+                  <div
+                    style={{
+                      background: "rgba(239, 68, 68, 0.1)",
+                      border: "1px solid rgba(239, 68, 68, 0.35)",
+                      padding: "14px 18px",
+                      borderRadius: "var(--radius-control)",
+                      marginBottom: "16px",
+                      display: "flex",
+                      alignItems: "center",
+                      justifyContent: "space-between",
+                      gap: "12px",
+                      flexWrap: "wrap"
+                    }}
+                  >
+                    <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+                      <span style={{ fontSize: "1.3rem" }}>⚠️</span>
+                      <div>
+                        <strong style={{ display: "block", color: "#fca5a5", fontSize: "0.92rem" }}>
+                          Connection stalled or timed out
+                        </strong>
+                        <span className="subtle-text" style={{ fontSize: "0.78rem" }}>
+                          {statusMessage || "Unable to establish live audio stream."}
+                        </span>
+                      </div>
+                    </div>
+                    <button
+                      type="button"
+                      className="button-primary"
+                      onClick={handleManualRetry}
+                      style={{ fontSize: "0.8rem", padding: "6px 16px" }}
+                    >
+                      🔄 Retry Audio Connection
+                    </button>
+                  </div>
+                )}
 
                 {/* Synchronized Now Playing Pill */}
                 {currentTrack?.title && (

@@ -660,6 +660,10 @@ io.on("connection", (socket) => {
     socket.emit("room-ready", {
       roomId
     });
+    socket.to(roomId).emit("host-connected", {
+      roomId,
+      hostName: session.hostName
+    });
     emitUserCount(roomId);
 
     // If any listeners were already waiting in the room, notify reconnected host so WebRTC can negotiate
@@ -700,6 +704,15 @@ io.on("connection", (socket) => {
           joinedAt: Date.now()
         });
       }
+    });
+
+    socket.emit("room-joined", {
+      roomId,
+      hostConnected: Boolean(session.hostConnected),
+      hostName: session.hostName,
+      title: session.title,
+      category: session.category,
+      currentTrack: session.currentTrack
     });
 
     io.to(roomId).emit("listener-joined-room", {
@@ -871,6 +884,10 @@ io.on("connection", (socket) => {
 
     if (role === "host") {
       setHostConnected(roomId, false);
+      socket.to(roomId).emit("host-disconnected", {
+        roomId,
+        reason: "Host temporarily disconnected."
+      });
       const timer = setTimeout(() => {
         hostDisconnectTimers.delete(roomId);
         const session = deleteSession(roomId);

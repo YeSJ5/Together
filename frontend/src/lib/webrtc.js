@@ -80,8 +80,12 @@ export function createPeerConnection({
   };
 
   peerConnection.ontrack = (event) => {
-    if (event.streams && event.streams[0] && onTrack) {
+    if (!onTrack) return;
+    if (event.streams && event.streams[0]) {
       onTrack(event.streams[0]);
+    } else if (event.track) {
+      const stream = new MediaStream([event.track]);
+      onTrack(stream);
     }
   };
 
