@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import AppShell from "../components/AppShell";
 import { fetchPublicRooms } from "../lib/api";
@@ -22,8 +22,10 @@ export default function HomePage() {
   // Public active rooms discovery
   const [activeRooms, setActiveRooms] = useState([]);
   const [isLoadingRooms, setIsLoadingRooms] = useState(true);
+  const [loadRoomsError, setLoadRoomsError] = useState(null);
   const [roomFilterCategory, setRoomFilterCategory] = useState("All");
   const [roomSearchQuery, setRoomSearchQuery] = useState("");
+  const isFetchingRoomsRef = useRef(false);
 
   // Recent rooms from local storage
   const [recentRooms, setRecentRooms] = useState([]);
@@ -39,17 +41,24 @@ export default function HomePage() {
 
     // Fetch active public rooms
     loadPublicRooms();
-    const interval = setInterval(loadPublicRooms, 8000);
+    const interval = setInterval(loadPublicRooms, 10000);
     return () => clearInterval(interval);
   }, []);
 
   function loadPublicRooms() {
+    if (isFetchingRoomsRef.current) return;
+    isFetchingRoomsRef.current = true;
+
     fetchPublicRooms()
       .then((data) => {
         setActiveRooms(data.rooms || []);
+        setLoadRoomsError(null);
       })
-      .catch(() => {})
+      .catch((err) => {
+        setLoadRoomsError(err.message || "Could not reach audio service.");
+      })
       .finally(() => {
+        isFetchingRoomsRef.current = false;
         setIsLoadingRooms(false);
       });
   }
@@ -306,10 +315,38 @@ export default function HomePage() {
         </div>
 
         {/* Room Cards Grid */}
-        {isLoadingRooms ? (
+        {isLoadingRooms && activeRooms.length === 0 ? (
           <div style={{ textAlign: "center", padding: "36px" }}>
             <div className="spinner-disc" />
             <p className="subtle-text" style={{ marginTop: "12px" }}>Scanning active frequencies...</p>
+          </div>
+        ) : loadRoomsError && activeRooms.length === 0 ? (
+          <div style={{
+            textAlign: "center",
+            padding: "36px 20px",
+            background: "rgba(239, 68, 68, 0.06)",
+            borderRadius: "var(--radius-control)",
+            border: "1px dashed rgba(239, 68, 68, 0.3)"
+          }}>
+            <span style={{ fontSize: "2rem", display: "block", marginBottom: "8px" }}>📡</span>
+            <h3 style={{ fontSize: "1.1rem", fontWeight: 700, margin: "0 0 6px", color: "var(--accent-rose)" }}>
+              Unable to reach broadcast directory
+            </h3>
+            <p className="subtle-text" style={{ fontSize: "0.88rem", maxWidth: "420px", margin: "0 auto 16px" }}>
+              {loadRoomsError} If the server is starting up, it will connect shortly.
+            </p>
+            <button
+              type="button"
+              className="button-primary"
+              onClick={() => {
+                setIsLoadingRooms(true);
+                setLoadRoomsError(null);
+                loadPublicRooms();
+              }}
+              style={{ padding: "8px 18px", fontSize: "0.85rem" }}
+            >
+              🔄 Retry Connection
+            </button>
           </div>
         ) : filteredRooms.length === 0 ? (
           <div style={{

@@ -1,6 +1,7 @@
 import { Link, useLocation } from "react-router-dom";
 import { useEffect, useState } from "react";
 import { API_BASE_URL } from "../config";
+import { fetchWithTimeout } from "../lib/api";
 import FloatingMiniPlayer from "./FloatingMiniPlayer";
 import AudioDiagnosticsModal from "./AudioDiagnosticsModal";
 import AboutModal from "./AboutModal";
@@ -22,8 +23,8 @@ export default function AppShell({ children }) {
   });
 
   useEffect(() => {
-    // Proactively warm up backend to eliminate broadcast setup delay
-    fetch(`${API_BASE_URL}/api/health`, { cache: "no-store" }).catch(() => {});
+    // Proactively warm up backend to eliminate broadcast setup delay (bounded to 5s)
+    fetchWithTimeout(`${API_BASE_URL}/api/health`, { cache: "no-store" }, 5000).catch(() => {});
   }, []);
 
   useEffect(() => {

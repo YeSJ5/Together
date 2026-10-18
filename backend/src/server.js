@@ -26,6 +26,13 @@ const {
   hydrateSessionsFromDatabase
 } = require("./sessionStore");
 
+process.on("unhandledRejection", (reason) => {
+  logger.error("Unhandled Rejection", { error: reason instanceof Error ? reason.message : String(reason) });
+});
+process.on("uncaughtException", (error) => {
+  logger.error("Uncaught Exception", { error: error.message, stack: error.stack });
+});
+
 const app = express();
 app.set("trust proxy", 1);
 const server = http.createServer(app);
@@ -39,7 +46,18 @@ function isOriginAllowed(origin) {
     return true;
   }
 
-  return ALLOWED_ORIGINS.includes(origin);
+  if (ALLOWED_ORIGINS.includes(origin)) {
+    return true;
+  }
+
+  if (
+    /^https:\/\/together-[a-z0-9\-]+-yeshws-projects\.vercel\.app$/.test(origin) ||
+    /^https:\/\/together-[a-z0-9\-]+\.vercel\.app$/.test(origin)
+  ) {
+    return true;
+  }
+
+  return false;
 }
 
 function getLocalIpv4Address() {
@@ -111,10 +129,10 @@ app.get("/api/health", async (_request, response) => {
   try {
     const db = getDatabase();
     const dbHealth = await db.checkHealth();
-    const dbRooms = typeof db.listAllActiveRoomsAsync === "function" ? await db.listAllActiveRoomsAsync() : await db.listPublicActiveRoomsAsync();
+    const dbRooms = typeof db.listAllActiveRooms === "function" ? db.listAllActiveRooms() : (typeof db.listAllActiveRoomsAsync === "function" ? await db.listAllActiveRoomsAsync() : await db.listPublicActiveRoomsAsync());
     const mem = process.memoryUsage();
     const ice = getIceServerConfig();
-    const activePublicRooms = await listActivePublicSessionsAsync();
+    const activePublicRooms = listActivePublicSessions();
 
     const isHealthy = dbHealth.healthy !== false && dbHealth.status === "connected";
 

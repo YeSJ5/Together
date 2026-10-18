@@ -41,6 +41,8 @@ export default function LiveSessionPage() {
   const [isMuted, setIsMuted] = useState(false);
   const [sessionEnded, setSessionEnded] = useState(false);
   const [endReason, setEndReason] = useState("");
+  const [connectionError, setConnectionError] = useState(null);
+  const [isVerifying, setIsVerifying] = useState(true);
   const [listenerCount, setListenerCount] = useState(1);
   const [currentTrack, setCurrentTrack] = useState(null);
   const [transcripts, setTranscripts] = useState([]);
@@ -73,6 +75,8 @@ export default function LiveSessionPage() {
     getDynamicIceServers().catch(() => {});
 
     // Verify session initially
+    setConnectionError(null);
+    setIsVerifying(true);
     fetchSession(normalizedRoomId)
       .then((data) => {
         if (!isCancelled) {
@@ -103,10 +107,19 @@ export default function LiveSessionPage() {
           } catch (_e) {}
         }
       })
-      .catch(() => {
+      .catch((err) => {
         if (!isCancelled) {
-          setSessionEnded(true);
-          setEndReason("This session does not exist or has expired.");
+          if (err.status === 404) {
+            setSessionEnded(true);
+            setEndReason("This session does not exist or has expired.");
+          } else {
+            setConnectionError(err.message || "Could not reach session. The server may be starting up.");
+          }
+        }
+      })
+      .finally(() => {
+        if (!isCancelled) {
+          setIsVerifying(false);
         }
       });
 
@@ -149,6 +162,21 @@ export default function LiveSessionPage() {
           },
           onTrack: (remoteStream) => {
             attachRemoteAudio(remoteStream);
+          },
+          onConnectionStateChange: (state) => {
+            if (state === "connected") {
+              setIsConnected(true);
+            } else if (state === "disconnected" || state === "failed") {
+              setIsConnected(false);
+              if (state === "failed" && socketRef.current && socketRef.current.connected) {
+                // Request fresh negotiation from host
+                socketRef.current.emit("listener-joined-room", {
+                  roomId: normalizedRoomId,
+                  listenerId,
+                  username
+                });
+              }
+            }
           }
         });
 
@@ -164,8 +192,6 @@ export default function LiveSessionPage() {
           answer,
           senderId: listenerId
         });
-
-        setIsConnected(true);
       } catch (_err) {
         // Connection negotiation error
       }
@@ -462,6 +488,44 @@ export default function LiveSessionPage() {
             <Link to="/" className="button-primary" style={{ display: "inline-block", textDecoration: "none" }}>
               Return to Home
             </Link>
+          </div>
+        ) : connectionError && !sessionData ? (
+          <div className="content-card fade-in" style={{ padding: "48px 32px", textAlign: "center", maxWidth: "520px", margin: "60px auto" }}>
+            <span style={{ fontSize: "3rem", display: "block", marginBottom: "12px" }}>📡</span>
+            <h2 style={{ fontSize: "1.5rem", margin: "0 0 8px", color: "var(--accent-rose)" }}>Connection Timeout</h2>
+            <p className="subtle-text" style={{ marginBottom: "24px" }}>
+              {connectionError} If the server was sleeping, it will be ready in a few moments.
+            </p>
+            <div style={{ display: "flex", gap: "12px", justifyContent: "center" }}>
+              <button
+                type="button"
+                className="button-primary"
+                onClick={() => {
+                  setConnectionError(null);
+                  setIsVerifying(true);
+                  fetchSession(normalizedRoomId)
+                    .then((data) => {
+                      setSessionData(data);
+                      setListenerCount((data.users?.length || 0) + 1);
+                      if (data.currentTrack) setCurrentTrack(data.currentTrack);
+                    })
+                    .catch((err) => {
+                      setConnectionError(err.message || "Failed to reach session.");
+                    })
+                    .finally(() => setIsVerifying(false));
+                }}
+              >
+                🔄 Retry Connection
+              </button>
+              <Link to="/" className="button-secondary" style={{ textDecoration: "none" }}>
+                Return to Home
+              </Link>
+            </div>
+          </div>
+        ) : isVerifying && !sessionData ? (
+          <div style={{ textAlign: "center", padding: "80px 20px" }}>
+            <div className="spinner-disc" />
+            <p className="subtle-text" style={{ marginTop: "16px" }}>Connecting to audio broadcast stage...</p>
           </div>
         ) : (
           <div ref={roomContainerRef} style={{ position: "relative" }}>

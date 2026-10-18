@@ -3,7 +3,8 @@ import { Link, useSearchParams } from "react-router-dom";
 import QRCode from "react-qr-code";
 import AppShell from "../components/AppShell";
 import { useAudioRoom } from "../context/AudioRoomContext";
-import { createSession, endSession, updateSessionTrack } from "../lib/api";
+import { API_BASE_URL } from "../config";
+import { createSession, endSession, updateSessionTrack, fetchWithTimeout } from "../lib/api";
 import { createAppId } from "../lib/ids";
 import { sanitizeDisplayName } from "../lib/sanitize";
 import { createSocket } from "../lib/socket";
@@ -92,7 +93,7 @@ export default function HostDashboardPage() {
 
   // Fetch runtime LAN origin for mobile QR compatibility
   useEffect(() => {
-    fetch("/api/runtime")
+    fetchWithTimeout(`${API_BASE_URL}/api/runtime`, { cache: "no-store" }, 4000)
       .then((res) => res.json())
       .then((data) => {
         if (data.lanOrigin && window.location.hostname === "localhost") {
@@ -512,6 +513,14 @@ export default function HostDashboardPage() {
         if (!listenerId || !masterStreamRef.current) return;
 
         try {
+          const existing = peerConnectionsRef.current.get(listenerId);
+          if (existing) {
+            try {
+              existing.close();
+            } catch (_) {}
+            peerConnectionsRef.current.delete(listenerId);
+          }
+
           const pc = createPeerConnection({
             onIceCandidate: (candidate) => {
               socket.emit("signal:ice-candidate", {

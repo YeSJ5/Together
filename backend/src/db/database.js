@@ -52,9 +52,10 @@ class TogetherDatabase {
     return "json-journal";
   }
 
-  async waitForReady() {
+  async waitForReady(timeoutMs = 6000) {
     if (this.readyPromise) {
-      await this.readyPromise;
+      const timeout = new Promise((resolve) => setTimeout(resolve, timeoutMs));
+      await Promise.race([this.readyPromise, timeout]);
     }
     return this;
   }
@@ -82,7 +83,9 @@ class TogetherDatabase {
           connectionString: this.databaseUrl,
           max: 10,
           idleTimeoutMillis: 30000,
-          connectionTimeoutMillis: 5000
+          connectionTimeoutMillis: 5000,
+          statement_timeout: 10000,
+          query_timeout: 10000
         };
 
         // Render / Supabase / Neon / Heroku Postgres SSL
@@ -91,6 +94,7 @@ class TogetherDatabase {
         }
 
         this.pgPool = new pg.Pool(poolConfig);
+        this.isHydrating = false;
         this.readyPromise = this.runPgMigrations()
           .then(() => this.hydratePgCache())
           .then(() => {
@@ -258,7 +262,8 @@ class TogetherDatabase {
   }
 
   async hydratePgCache() {
-    if (!this.pgPool) return;
+    if (!this.pgPool || this.isHydrating) return;
+    this.isHydrating = true;
     try {
       const roomRes = await this.pgPool.query(
         "SELECT * FROM rooms WHERE status = 'active' ORDER BY created_at DESC LIMIT 200"
@@ -282,6 +287,8 @@ class TogetherDatabase {
       }
     } catch (err) {
       console.warn("[DB] Could not hydrate PostgreSQL cache:", err.message);
+    } finally {
+      this.isHydrating = false;
     }
   }
 
@@ -887,7 +894,11 @@ class TogetherDatabase {
             error: "PostgreSQL pool uninitialized"
           };
         }
-        const res = await this.pgPool.query("SELECT 1 as alive");
+        const queryPromise = this.pgPool.query("SELECT 1 as alive");
+        const timeoutPromise = new Promise((_, reject) =>
+          setTimeout(() => reject(new Error("Database health check timed out after 3000ms")), 3000)
+        );
+        const res = await Promise.race([queryPromise, timeoutPromise]);
         return {
           status: "connected",
           driver: "postgresql",

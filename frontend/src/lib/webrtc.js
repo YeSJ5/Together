@@ -1,4 +1,5 @@
 import { API_BASE_URL } from "../config";
+import { fetchWithTimeout } from "./api";
 
 export const DEFAULT_ICE_SERVERS = [
   { urls: "stun:stun.l.google.com:19302" },
@@ -10,10 +11,11 @@ export const DEFAULT_ICE_SERVERS = [
 let cachedIceServers = null;
 let lastFetchTime = 0;
 let currentCacheTtlMs = 30 * 60 * 1000; // default 30 minutes
+let pendingIcePromise = null;
 
 /**
  * Dynamically resolves ICE servers from backend.
- * Falls back to default STUN list if unreachable.
+ * Falls back to default STUN list if unreachable or timed out.
  */
 export async function getDynamicIceServers() {
   const now = Date.now();
@@ -21,25 +23,39 @@ export async function getDynamicIceServers() {
     return cachedIceServers;
   }
 
-  try {
-    const response = await fetch(`${API_BASE_URL}/api/ice-servers?clientId=browser-${Math.random().toString(36).slice(2, 7)}`);
-    if (response.ok) {
-      const data = await response.json();
-      if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
-        cachedIceServers = data.iceServers;
-        lastFetchTime = now;
-        if (data.ttl && Number(data.ttl) > 0) {
-          // Refresh at 80% of TTL or 30 minutes, minimum 30 seconds
-          currentCacheTtlMs = Math.min(30 * 60 * 1000, Math.max(30000, Number(data.ttl) * 1000 * 0.8));
-        }
-        return cachedIceServers;
-      }
-    }
-  } catch (_err) {
-    // Graceful fallback to default STUN servers
+  if (pendingIcePromise) {
+    return pendingIcePromise;
   }
 
-  return DEFAULT_ICE_SERVERS;
+  pendingIcePromise = (async () => {
+    try {
+      const response = await fetchWithTimeout(
+        `${API_BASE_URL}/api/ice-servers?clientId=browser-${Math.random().toString(36).slice(2, 7)}`,
+        { cache: "no-store" },
+        4000
+      );
+      if (response.ok) {
+        const data = await response.json();
+        if (Array.isArray(data.iceServers) && data.iceServers.length > 0) {
+          cachedIceServers = data.iceServers;
+          lastFetchTime = Date.now();
+          if (data.ttl && Number(data.ttl) > 0) {
+            // Refresh at 80% of TTL or 30 minutes, minimum 30 seconds
+            currentCacheTtlMs = Math.min(30 * 60 * 1000, Math.max(30000, Number(data.ttl) * 1000 * 0.8));
+          }
+          return cachedIceServers;
+        }
+      }
+    } catch (_err) {
+      // Graceful fallback to default STUN servers
+    } finally {
+      pendingIcePromise = null;
+    }
+
+    return DEFAULT_ICE_SERVERS;
+  })();
+
+  return pendingIcePromise;
 }
 
 export function createPeerConnection({
