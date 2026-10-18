@@ -212,20 +212,12 @@ export async function captureHostAudio(audioSourceMode) {
         displayStream.getVideoTracks().forEach((track) => track.stop());
         return new MediaStream(audioTracks);
       }
-    } catch (_err) {
-      // User cancelled or browser rejected getDisplayMedia; fallback below
+      displayStream.getTracks().forEach((track) => track.stop());
+      throw new Error("No audio track selected in browser dialog. Ensure 'Share tab audio' or 'Share audio' was enabled.");
+    } catch (err) {
+      throw new Error(err.message || "Tab or system audio capture was cancelled or failed.");
     }
   }
 
-  // Fallback: Pure stereo audio capture
-  return navigator.mediaDevices.getUserMedia({
-    audio: {
-      echoCancellation: false,
-      noiseSuppression: false,
-      autoGainControl: false,
-      channelCount: { ideal: 2 },
-      sampleRate: { ideal: 48000 }
-    },
-    video: false
-  });
+  throw new Error("Screen and tab audio capture (getDisplayMedia) is not supported in this browser environment.");
 }

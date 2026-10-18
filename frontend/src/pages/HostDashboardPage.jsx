@@ -16,6 +16,7 @@ import {
   isNativeAndroidApp,
   startNativeSystemAudioBridge
 } from "../lib/nativeAudio";
+import { getHostCapabilities } from "../lib/capabilities";
 
 export default function HostDashboardPage() {
   const [searchParams] = useSearchParams();
@@ -24,6 +25,9 @@ export default function HostDashboardPage() {
   const initialCategory = searchParams.get("category") || "Music";
 
   const { registerActiveSession, leaveActiveSession, setAudioLevel: setGlobalAudioLevel } = useAudioRoom();
+
+  const hostCaps = useMemo(() => getHostCapabilities(), []);
+  const isMobile = hostCaps.isMobile;
 
   const [hostName, setHostName] = useState(initialName || "Host");
   const [sessionTitle, setSessionTitle] = useState(initialTitle || "");
@@ -39,6 +43,7 @@ export default function HostDashboardPage() {
   // Audio Mixer Channels
   const [isMicOn, setIsMicOn] = useState(false); // DEFAULT FALSE (MUTED - MUSIC ONLY)
   const [micVolume, setMicVolume] = useState(1.0);
+  const [micError, setMicError] = useState("");
   const [isAppAudioActive, setIsAppAudioActive] = useState(false);
   const [appAudioVolume, setAppAudioVolume] = useState(1.0);
   const [appAudioError, setAppAudioError] = useState("");
@@ -50,6 +55,7 @@ export default function HostDashboardPage() {
   const [fileDuration, setFileDuration] = useState(0);
   const [fileCurrentTime, setFileCurrentTime] = useState(0);
   const [fileVolume, setFileVolume] = useState(1.0);
+  const [fileError, setFileError] = useState("");
 
   // Visualizer & Stats
   const [masterLevel, setMasterLevel] = useState(0);
@@ -164,6 +170,14 @@ export default function HostDashboardPage() {
     fileGain.connect(ctx.destination); // Route file to host local speaker/headphones too
     fileGainNodeRef.current = fileGain;
 
+    if (fileAudioRef.current && !fileSourceNodeRef.current) {
+      try {
+        const source = ctx.createMediaElementSource(fileAudioRef.current);
+        fileSourceNodeRef.current = source;
+        source.connect(fileGain);
+      } catch (_) {}
+    }
+
     // Visualizer loop (throttled to avoid 60fps React state re-render cascades)
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
     const renderMeters = () => {
@@ -225,8 +239,57 @@ export default function HostDashboardPage() {
     return ctx;
   }
 
+  // Get or lazily create a persistent HTMLAudioElement wired to WebAudio graph
+  function getOrCreateFileAudio(ctx) {
+    if (!fileAudioRef.current) {
+      const audio = new Audio();
+      audio.preload = "auto";
+      audio.playsInline = true;
+      audio.setAttribute("playsinline", "true");
+      audio.setAttribute("webkit-playsinline", "true");
+
+      audio.onloadedmetadata = () => {
+        setFileDuration(audio.duration || 0);
+      };
+
+      audio.ontimeupdate = () => {
+        if (audio.duration) {
+          setFileCurrentTime(audio.currentTime);
+          setFileProgress((audio.currentTime / audio.duration) * 100);
+        }
+      };
+
+      audio.onended = () => {
+        setIsFilePlaying(false);
+      };
+
+      audio.onerror = () => {
+        setIsFilePlaying(false);
+        setFileError("Unable to play selected audio file. The format may be unsupported by your browser.");
+      };
+
+      fileAudioRef.current = audio;
+
+      if (!fileSourceNodeRef.current && fileGainNodeRef.current) {
+        try {
+          const source = ctx.createMediaElementSource(audio);
+          fileSourceNodeRef.current = source;
+          source.connect(fileGainNodeRef.current);
+        } catch (_) {}
+      }
+    } else if (!fileSourceNodeRef.current && fileGainNodeRef.current) {
+      try {
+        const source = ctx.createMediaElementSource(fileAudioRef.current);
+        fileSourceNodeRef.current = source;
+        source.connect(fileGainNodeRef.current);
+      } catch (_) {}
+    }
+    return fileAudioRef.current;
+  }
+
   // Toggle Microphone (Default is OFF / MUTED)
   async function toggleMicrophone() {
+    setMicError("");
     const ctx = initMasterMixer();
     if (ctx.state === "suspended") {
       await ctx.resume();
@@ -236,6 +299,11 @@ export default function HostDashboardPage() {
       // MUTE MIC IMMEDIATELY
       if (micGainNodeRef.current) {
         micGainNodeRef.current.gain.setTargetAtTime(0, ctx.currentTime, 0.03);
+      }
+      if (micStreamRef.current) {
+        micStreamRef.current.getAudioTracks().forEach((t) => {
+          t.enabled = false;
+        });
       }
       setIsMicOn(false);
       return;
@@ -257,14 +325,18 @@ export default function HostDashboardPage() {
         const sourceNode = ctx.createMediaStreamSource(stream);
         micSourceNodeRef.current = sourceNode;
         sourceNode.connect(micGainNodeRef.current);
+      } else {
+        micStreamRef.current.getAudioTracks().forEach((t) => {
+          t.enabled = true;
+        });
       }
 
       if (micGainNodeRef.current) {
         micGainNodeRef.current.gain.setTargetAtTime(micVolume, ctx.currentTime, 0.03);
       }
       setIsMicOn(true);
-    } catch (err) {
-      setError("Microphone permission was denied or is unavailable.");
+    } catch (_err) {
+      setMicError("Microphone permission was denied or is unavailable on this device.");
     }
   }
 
@@ -279,6 +351,14 @@ export default function HostDashboardPage() {
   // Toggle App Audio (Spotify, YouTube, Tabs, Screens, Native Android)
   async function startAppAudioSharing() {
     setAppAudioError("");
+
+    if (isMobile && !isNativeAndroidApp()) {
+      setAppAudioError(
+        "Browser tab & app audio capture is only available on desktop browsers (Chrome, Edge, Brave, Firefox) due to mobile OS sandbox restrictions. To stream music on mobile, use Music File Player or DJ Voice Mic."
+      );
+      return;
+    }
+
     const ctx = initMasterMixer();
     if (ctx.state === "suspended") {
       await ctx.resume();
@@ -320,7 +400,7 @@ export default function HostDashboardPage() {
     try {
       if (!navigator.mediaDevices?.getDisplayMedia) {
         throw new Error(
-          "Tab/system audio capture (getDisplayMedia) is not supported by your current browser or device. On mobile browsers or iOS Safari, you can broadcast using DJ Voice Mic (Channel 1) or Audio File Player (Channel 3)."
+          "Tab/system audio capture is not supported in this browser environment. Use Music File Player or DJ Voice Mic to broadcast."
         );
       }
 
@@ -361,7 +441,7 @@ export default function HostDashboardPage() {
       if (audioTracks.length === 0) {
         displayStream.getTracks().forEach((t) => t.stop());
         throw new Error(
-          "No audio track was selected. When the browser share dialog appears, make sure to check 'Share audio' or 'Share tab audio'. (Note: Individual application windows typically cannot share audio due to operating system security restrictions)."
+          "No audio track was selected. When the browser share dialog appears, make sure to select 'Browser Tab' and check 'Share audio'."
         );
       }
 
@@ -425,63 +505,59 @@ export default function HostDashboardPage() {
     const file = e.target.files?.[0];
     if (!file) return;
 
+    setFileError("");
     const ctx = initMasterMixer();
     if (ctx.state === "suspended") {
       await ctx.resume();
     }
 
-    if (fileAudioRef.current) {
-      fileAudioRef.current.pause();
-    }
+    const audio = getOrCreateFileAudio(ctx);
+    audio.pause();
+
     if (fileObjectUrlRef.current) {
       URL.revokeObjectURL(fileObjectUrlRef.current);
+      fileObjectUrlRef.current = null;
     }
 
     const objectUrl = URL.createObjectURL(file);
     fileObjectUrlRef.current = objectUrl;
     setSelectedFileName(file.name);
 
-    const audio = new Audio();
     audio.src = objectUrl;
-    audio.preload = "auto";
-    audio.playsInline = true;
-    fileAudioRef.current = audio;
+    audio.load();
 
-    audio.onloadedmetadata = () => {
-      setFileDuration(audio.duration || 0);
-    };
-
-    audio.ontimeupdate = () => {
-      if (audio.duration) {
-        setFileCurrentTime(audio.currentTime);
-        setFileProgress((audio.currentTime / audio.duration) * 100);
-      }
-    };
-
-    audio.onended = () => {
+    try {
+      await audio.play();
+      setIsFilePlaying(true);
+      handleBroadcastTrack(file.name.replace(/\.[^/.]+$/, ""), hostName);
+    } catch (err) {
       setIsFilePlaying(false);
-    };
-
-    // Connect file to WebAudio graph
-    if (!fileSourceNodeRef.current) {
-      const source = ctx.createMediaElementSource(audio);
-      fileSourceNodeRef.current = source;
-      source.connect(fileGainNodeRef.current);
+      if (err.name !== "AbortError") {
+        setFileError("Autoplay restricted by browser. Tap the Play button (▶) to start streaming.");
+      }
     }
-
-    await audio.play();
-    setIsFilePlaying(true);
-    handleBroadcastTrack(file.name.replace(/\.[^/.]+$/, ""), hostName);
   }
 
   function toggleFilePlay() {
-    if (!fileAudioRef.current) return;
+    const ctx = initMasterMixer();
+    if (ctx.state === "suspended") {
+      ctx.resume().catch(() => {});
+    }
+    const audio = getOrCreateFileAudio(ctx);
     if (isFilePlaying) {
-      fileAudioRef.current.pause();
+      audio.pause();
       setIsFilePlaying(false);
     } else {
-      fileAudioRef.current.play();
-      setIsFilePlaying(true);
+      setFileError("");
+      audio
+        .play()
+        .then(() => {
+          setIsFilePlaying(true);
+        })
+        .catch((err) => {
+          setIsFilePlaying(false);
+          setFileError("Playback failed: " + (err.message || "Tap play to retry."));
+        });
     }
   }
 
@@ -707,21 +783,52 @@ export default function HostDashboardPage() {
 
     if (fileAudioRef.current) {
       fileAudioRef.current.pause();
+      fileAudioRef.current.src = "";
+      fileAudioRef.current.onloadedmetadata = null;
+      fileAudioRef.current.ontimeupdate = null;
+      fileAudioRef.current.onended = null;
+      fileAudioRef.current.onerror = null;
       fileAudioRef.current = null;
     }
     if (fileObjectUrlRef.current) {
       URL.revokeObjectURL(fileObjectUrlRef.current);
       fileObjectUrlRef.current = null;
     }
+    if (fileSourceNodeRef.current) {
+      try { fileSourceNodeRef.current.disconnect(); } catch (_) {}
+      fileSourceNodeRef.current = null;
+    }
+    if (fileGainNodeRef.current) {
+      try { fileGainNodeRef.current.disconnect(); } catch (_) {}
+      fileGainNodeRef.current = null;
+    }
 
     if (micStreamRef.current) {
       micStreamRef.current.getTracks().forEach((t) => t.stop());
       micStreamRef.current = null;
     }
+    if (micSourceNodeRef.current) {
+      try { micSourceNodeRef.current.disconnect(); } catch (_) {}
+      micSourceNodeRef.current = null;
+    }
+    if (micGainNodeRef.current) {
+      try { micGainNodeRef.current.disconnect(); } catch (_) {}
+      micGainNodeRef.current = null;
+    }
+
     if (appAudioStreamRef.current) {
       appAudioStreamRef.current.getTracks().forEach((t) => t.stop());
       appAudioStreamRef.current = null;
     }
+    if (appAudioSourceNodeRef.current) {
+      try { appAudioSourceNodeRef.current.disconnect(); } catch (_) {}
+      appAudioSourceNodeRef.current = null;
+    }
+    if (appAudioGainNodeRef.current) {
+      try { appAudioGainNodeRef.current.disconnect(); } catch (_) {}
+      appAudioGainNodeRef.current = null;
+    }
+
     if (nativeBridgeRef.current) {
       nativeBridgeRef.current.stop().catch(() => {});
       nativeBridgeRef.current = null;
@@ -734,6 +841,9 @@ export default function HostDashboardPage() {
       audioContextRef.current.close().catch(() => {});
       audioContextRef.current = null;
     }
+    mixerDestinationRef.current = null;
+    masterStreamRef.current = null;
+    analyserRef.current = null;
 
     if (bgAudioRef.current) {
       bgAudioRef.current.pause();
@@ -976,7 +1086,9 @@ export default function HostDashboardPage() {
                 Universal Broadcast Studio
               </h1>
               <p className="subtle-text" style={{ fontSize: "0.95rem", margin: 0 }}>
-                One live link. Share music from Spotify, YouTube, your audio files, and optionally use your mic.
+                {isMobile
+                  ? "One live link. Stream local music files and broadcast your voice directly from your mobile device."
+                  : "One live link. Share music from Spotify, YouTube, your audio files, and optionally use your mic."}
               </p>
             </div>
 
@@ -1062,7 +1174,15 @@ export default function HostDashboardPage() {
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
                   <span style={{ fontSize: "1.2rem" }}>🎵</span>
                   <div>
-                    <strong style={{ color: "var(--text-main)" }}>Open Multi-Source Mixer:</strong> Switch between Spotify, YouTube, & music files anytime inside the live link.
+                    {isMobile ? (
+                      <>
+                        <strong style={{ color: "var(--text-main)" }}>Mobile Multi-Source Mixer:</strong> Stream audio files (MP3, WAV, FLAC, M4A) & DJ Voice Mic directly from your phone.
+                      </>
+                    ) : (
+                      <>
+                        <strong style={{ color: "var(--text-main)" }}>Open Multi-Source Mixer:</strong> Switch between Spotify, YouTube, & music files anytime inside the live link.
+                      </>
+                    )}
                   </div>
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
@@ -1306,259 +1426,529 @@ export default function HostDashboardPage() {
               </span>
             </div>
 
-            {/* CHANNEL 1: Host Voice Mic (OFF BY DEFAULT) */}
+            {/* Source Capability Overview Banner */}
             <div
               style={{
-                background: isMicOn ? "rgba(255, 71, 87, 0.08)" : "rgba(255, 255, 255, 0.03)",
-                border: `1px solid ${isMicOn ? "rgba(255, 71, 87, 0.4)" : "var(--border-subtle)"}`,
-                borderRadius: "var(--radius-control)",
-                padding: "16px",
-                transition: "all 0.25s ease"
+                display: "flex",
+                flexDirection: "column",
+                gap: "10px",
+                padding: "14px 16px",
+                background: "rgba(255, 255, 255, 0.02)",
+                border: "1px solid var(--border-subtle)",
+                borderRadius: "var(--radius-control)"
               }}
             >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <span style={{ fontSize: "1.1rem" }}>🎙️</span>
-                    <strong style={{ fontSize: "0.95rem" }}>DJ Voice Mic</strong>
-                  </div>
-                  <span className="subtle-text" style={{ fontSize: "0.78rem" }}>
-                    {isMicOn ? "Microphone is live over the stream" : "Muted by default • Tap to speak on air"}
-                  </span>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", flexWrap: "wrap", gap: "8px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span style={{ fontSize: "1.1rem" }}>{isMobile ? "📱" : "💻"}</span>
+                  <strong style={{ fontSize: "0.88rem" }}>
+                    {isMobile ? "Mobile Broadcast Studio" : "Desktop Broadcast Studio"}
+                  </strong>
                 </div>
-
-                <button
-                  type="button"
-                  onClick={toggleMicrophone}
-                  style={{
-                    padding: "8px 16px",
-                    borderRadius: "999px",
-                    fontWeight: 700,
-                    fontSize: "0.85rem",
-                    cursor: "pointer",
-                    border: "none",
-                    background: isMicOn ? "#ff4757" : "rgba(255, 255, 255, 0.1)",
-                    color: isMicOn ? "#fff" : "var(--text-secondary)",
-                    boxShadow: isMicOn ? "0 0 16px rgba(255, 71, 87, 0.5)" : "none",
-                    transition: "all 0.2s ease"
-                  }}
-                >
-                  {isMicOn ? "🔴 Mic Live (Tap to Mute)" : "🔇 Mic Muted (Tap to Speak)"}
-                </button>
-              </div>
-
-              {isMicOn && (
-                <div className="fade-in" style={{ display: "flex", alignItems: "center", gap: "12px", marginTop: "10px" }}>
-                  <span className="subtle-text" style={{ fontSize: "0.78rem", minWidth: "70px" }}>
-                    Voice Level: {Math.round(micVolume * 100)}%
-                  </span>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1.5"
-                    step="0.05"
-                    value={micVolume}
-                    onChange={handleMicVolumeChange}
-                    style={{ flex: 1 }}
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* CHANNEL 2: Spotify & App Audio Stream */}
-            <div
-              style={{
-                background: isAppAudioActive ? "rgba(16, 185, 129, 0.08)" : "rgba(255, 255, 255, 0.03)",
-                border: `1px solid ${isAppAudioActive ? "rgba(16, 185, 129, 0.4)" : "var(--border-subtle)"}`,
-                borderRadius: "var(--radius-control)",
-                padding: "16px",
-                transition: "all 0.25s ease"
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <span style={{ fontSize: "1.1rem" }}>💻</span>
-                    <strong style={{ fontSize: "0.95rem" }}>App & Device Audio</strong>
-                  </div>
-                  <span className="subtle-text" style={{ fontSize: "0.78rem" }}>
-                    {isAppAudioActive ? "Streaming Spotify, YouTube, or tab audio" : "Stream any music app or browser audio"}
-                  </span>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={isAppAudioActive ? stopAppAudioSharing : startAppAudioSharing}
-                  className={isAppAudioActive ? "button-secondary" : "button-primary"}
-                  style={{ fontSize: "0.85rem", padding: "8px 16px" }}
-                >
-                  {isAppAudioActive ? "⏹️ Stop App Audio" : "🎵 Share App Audio"}
-                </button>
-              </div>
-
-              {isAppAudioActive && (
-                <div className="fade-in" style={{ display: "flex", alignItems: "center", gap: "12px", marginTop: "10px" }}>
-                  <span className="subtle-text" style={{ fontSize: "0.78rem", minWidth: "70px" }}>
-                    Volume: {Math.round(appAudioVolume * 100)}%
-                  </span>
-                  <input
-                    type="range"
-                    min="0"
-                    max="1.5"
-                    step="0.05"
-                    value={appAudioVolume}
-                    onChange={handleAppAudioVolumeChange}
-                    style={{ flex: 1 }}
-                  />
-                </div>
-              )}
-
-              {appAudioError && (
-                <div
-                  style={{
-                    marginTop: "12px",
-                    padding: "10px 14px",
-                    borderRadius: "var(--radius-control)",
-                    background: "rgba(239, 68, 68, 0.12)",
-                    border: "1px solid rgba(239, 68, 68, 0.35)",
-                    color: "#fca5a5",
-                    fontSize: "0.82rem",
-                    lineHeight: 1.45,
-                    display: "flex",
-                    alignItems: "flex-start",
-                    gap: "10px"
-                  }}
-                >
-                  <span style={{ fontSize: "1.1rem" }}>⚠️</span>
-                  <div style={{ flex: 1 }}>
-                    <strong style={{ display: "block", marginBottom: "2px", color: "#fecaca" }}>App Audio Notice</strong>
-                    {appAudioError}
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setAppAudioError("")}
+                <div style={{ display: "flex", gap: "6px", flexWrap: "wrap" }}>
+                  <span
                     style={{
-                      background: "none",
-                      border: "none",
-                      color: "#fca5a5",
-                      cursor: "pointer",
-                      fontSize: "1.1rem",
-                      padding: "0 4px"
+                      fontSize: "0.72rem",
+                      fontWeight: 700,
+                      padding: "2px 8px",
+                      borderRadius: "999px",
+                      background: "rgba(6, 182, 212, 0.15)",
+                      color: "var(--accent-cyan)",
+                      border: "1px solid rgba(6, 182, 212, 0.3)"
                     }}
-                    aria-label="Dismiss notice"
                   >
-                    ✕
-                  </button>
-                </div>
-              )}
-
-              <div
-                style={{
-                  marginTop: "12px",
-                  padding: "8px 12px",
-                  background: "rgba(255, 255, 255, 0.02)",
-                  border: "1px solid var(--border-subtle)",
-                  borderRadius: "var(--radius-sm)",
-                  fontSize: "0.78rem",
-                  color: "var(--text-secondary)",
-                  lineHeight: 1.4
-                }}
-              >
-                💡 <strong>To stream Spotify or YouTube:</strong> Select a <em>Browser Tab</em> with &ldquo;Share audio&rdquo; checked, or select <em>Entire Screen</em> with &ldquo;Share system audio&rdquo; checked. (Individual app windows cannot share sound due to OS security).
-              </div>
-            </div>
-
-            {/* CHANNEL 3: Audio File Deck (MP3 / WAV / FLAC) */}
-            <div
-              style={{
-                background: selectedFileName ? "rgba(6, 182, 212, 0.08)" : "rgba(255, 255, 255, 0.03)",
-                border: `1px solid ${selectedFileName ? "rgba(6, 182, 212, 0.4)" : "var(--border-subtle)"}`,
-                borderRadius: "var(--radius-control)",
-                padding: "16px",
-                transition: "all 0.25s ease"
-              }}
-            >
-              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px" }}>
-                <div>
-                  <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                    <span style={{ fontSize: "1.1rem" }}>📁</span>
-                    <strong style={{ fontSize: "0.95rem" }}>Music File Player</strong>
-                  </div>
-                  <span className="subtle-text" style={{ fontSize: "0.78rem" }}>
-                    {selectedFileName || "Load & play local MP3, WAV, or FLAC songs"}
+                    ✓ Music Files Ready
                   </span>
-                </div>
-
-                <label
-                  className="button-secondary"
-                  style={{
-                    fontSize: "0.85rem",
-                    padding: "8px 16px",
-                    cursor: "pointer",
-                    display: "inline-block"
-                  }}
-                >
-                  {selectedFileName ? "Change File" : "Choose File"}
-                  <input
-                    type="file"
-                    accept="audio/*"
-                    onChange={handleAudioFileSelect}
-                    style={{ display: "none" }}
-                  />
-                </label>
-              </div>
-
-              {/* Embedded Player when file is loaded */}
-              {selectedFileName && (
-                <div className="fade-in" style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "10px" }}>
-                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                    <button
-                      type="button"
-                      onClick={toggleFilePlay}
-                      className="button-primary"
+                  <span
+                    style={{
+                      fontSize: "0.72rem",
+                      fontWeight: 700,
+                      padding: "2px 8px",
+                      borderRadius: "999px",
+                      background: "rgba(16, 185, 129, 0.15)",
+                      color: "var(--accent-primary)",
+                      border: "1px solid rgba(16, 185, 129, 0.3)"
+                    }}
+                  >
+                    ✓ Voice Mic Ready
+                  </span>
+                  {isMobile ? (
+                    <span
                       style={{
-                        width: "36px",
-                        height: "36px",
-                        borderRadius: "50%",
-                        padding: 0,
-                        display: "flex",
-                        alignItems: "center",
-                        justifyContent: "center"
+                        fontSize: "0.72rem",
+                        fontWeight: 700,
+                        padding: "2px 8px",
+                        borderRadius: "999px",
+                        background: "rgba(255, 255, 255, 0.05)",
+                        color: "var(--text-secondary)",
+                        border: "1px solid var(--border-subtle)"
+                      }}
+                      title="Mobile OS sandboxing prevents browsers from capturing audio of other apps."
+                    >
+                      ⊘ Tab Audio (Desktop Only)
+                    </span>
+                  ) : (
+                    <span
+                      style={{
+                        fontSize: "0.72rem",
+                        fontWeight: 700,
+                        padding: "2px 8px",
+                        borderRadius: "999px",
+                        background: "rgba(16, 185, 129, 0.15)",
+                        color: "var(--accent-primary)",
+                        border: "1px solid rgba(16, 185, 129, 0.3)"
                       }}
                     >
-                      {isFilePlaying ? "⏸" : "▶"}
-                    </button>
-                    <input
-                      type="range"
-                      min="0"
-                      max="100"
-                      step="0.1"
-                      value={fileProgress}
-                      onChange={handleFileSeek}
-                      style={{ flex: 1 }}
-                    />
-                    <span className="subtle-text" style={{ fontSize: "0.75rem", minWidth: "75px", textAlign: "right" }}>
-                      {formatTime(fileCurrentTime)} / {formatTime(fileDuration)}
+                      ✓ Tab & App Audio Ready
                     </span>
-                  </div>
-
-                  <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
-                    <span className="subtle-text" style={{ fontSize: "0.78rem", minWidth: "70px" }}>
-                      Track Gain: {Math.round(fileVolume * 100)}%
-                    </span>
-                    <input
-                      type="range"
-                      min="0"
-                      max="1.5"
-                      step="0.05"
-                      value={fileVolume}
-                      onChange={handleFileVolumeChange}
-                      style={{ flex: 1 }}
-                    />
-                  </div>
+                  )}
                 </div>
+              </div>
+              {isMobile && (
+                <p style={{ margin: 0, fontSize: "0.78rem", color: "var(--text-secondary)", lineHeight: 1.4 }}>
+                  💡 <strong>Mobile Audio Notice:</strong> Mobile operating systems (Android & iOS) sandbox web browsers and do not permit capturing internal audio from other background apps (like Spotify or Apple Music). To stream music directly, play local audio files or host from a desktop browser.
+                </p>
               )}
             </div>
+
+            {/* CHANNEL RENDERING: Mobile puts Music File Player first; Desktop puts Tab Audio first */}
+            {(() => {
+              // --- Channel Element: Music File Player ---
+              const filePlayerChannel = (
+                <div
+                  key="file-channel"
+                  style={{
+                    background: selectedFileName ? "rgba(6, 182, 212, 0.08)" : "rgba(255, 255, 255, 0.03)",
+                    border: `1px solid ${selectedFileName ? "rgba(6, 182, 212, 0.4)" : "var(--border-subtle)"}`,
+                    borderRadius: "var(--radius-control)",
+                    padding: "16px",
+                    transition: "all 0.25s ease"
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px", flexWrap: "wrap", gap: "10px" }}>
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ fontSize: "1.1rem" }}>📁</span>
+                        <strong style={{ fontSize: "0.95rem" }}>Music File Player</strong>
+                        {isMobile && (
+                          <span
+                            style={{
+                              fontSize: "0.7rem",
+                              fontWeight: 700,
+                              padding: "2px 8px",
+                              borderRadius: "999px",
+                              background: "rgba(16, 185, 129, 0.15)",
+                              color: "var(--accent-primary)",
+                              border: "1px solid rgba(16, 185, 129, 0.3)"
+                            }}
+                          >
+                            Mobile Primary
+                          </span>
+                        )}
+                      </div>
+                      <span className="subtle-text" style={{ fontSize: "0.78rem" }}>
+                        {selectedFileName || "Load & stream local MP3, WAV, FLAC, M4A, or AAC songs"}
+                      </span>
+                    </div>
+
+                    <label
+                      className="button-primary"
+                      style={{
+                        fontSize: "0.85rem",
+                        padding: "8px 16px",
+                        cursor: "pointer",
+                        display: "inline-block"
+                      }}
+                    >
+                      {selectedFileName ? "Change File" : "Choose Audio File"}
+                      <input
+                        type="file"
+                        accept="audio/*,.mp3,.wav,.flac,.m4a,.aac,.ogg,.opus"
+                        onChange={handleAudioFileSelect}
+                        style={{ display: "none" }}
+                      />
+                    </label>
+                  </div>
+
+                  {fileError && (
+                    <div
+                      style={{
+                        marginBottom: "10px",
+                        padding: "8px 12px",
+                        borderRadius: "var(--radius-sm)",
+                        background: "rgba(245, 158, 11, 0.12)",
+                        border: "1px solid rgba(245, 158, 11, 0.3)",
+                        color: "#fcd34d",
+                        fontSize: "0.8rem",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between"
+                      }}
+                    >
+                      <span>⚠️ {fileError}</span>
+                      <button
+                        type="button"
+                        onClick={() => setFileError("")}
+                        style={{ background: "none", border: "none", color: "#fcd34d", cursor: "pointer" }}
+                        aria-label="Dismiss error"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+
+                  {/* Embedded Player when file is loaded */}
+                  {selectedFileName && (
+                    <div className="fade-in" style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "10px" }}>
+                      <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                        <button
+                          type="button"
+                          onClick={toggleFilePlay}
+                          className="button-primary"
+                          style={{
+                            width: "36px",
+                            height: "36px",
+                            borderRadius: "50%",
+                            padding: 0,
+                            display: "flex",
+                            alignItems: "center",
+                            justifyContent: "center"
+                          }}
+                        >
+                          {isFilePlaying ? "⏸" : "▶"}
+                        </button>
+                        <input
+                          type="range"
+                          min="0"
+                          max="100"
+                          step="0.1"
+                          value={fileProgress}
+                          onChange={handleFileSeek}
+                          style={{ flex: 1 }}
+                        />
+                        <span className="subtle-text" style={{ fontSize: "0.75rem", minWidth: "75px", textAlign: "right" }}>
+                          {formatTime(fileCurrentTime)} / {formatTime(fileDuration)}
+                        </span>
+                      </div>
+
+                      <div style={{ display: "flex", alignItems: "center", gap: "12px" }}>
+                        <span className="subtle-text" style={{ fontSize: "0.78rem", minWidth: "70px" }}>
+                          Track Gain: {Math.round(fileVolume * 100)}%
+                        </span>
+                        <input
+                          type="range"
+                          min="0"
+                          max="1.5"
+                          step="0.05"
+                          value={fileVolume}
+                          onChange={handleFileVolumeChange}
+                          style={{ flex: 1 }}
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+
+              // --- Channel Element: DJ Voice Mic ---
+              const micChannel = (
+                <div
+                  key="mic-channel"
+                  style={{
+                    background: isMicOn ? "rgba(255, 71, 87, 0.08)" : "rgba(255, 255, 255, 0.03)",
+                    border: `1px solid ${isMicOn ? "rgba(255, 71, 87, 0.4)" : "var(--border-subtle)"}`,
+                    borderRadius: "var(--radius-control)",
+                    padding: "16px",
+                    transition: "all 0.25s ease"
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px", flexWrap: "wrap", gap: "10px" }}>
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ fontSize: "1.1rem" }}>🎙️</span>
+                        <strong style={{ fontSize: "0.95rem" }}>DJ Voice Mic</strong>
+                        <span
+                          style={{
+                            fontSize: "0.7rem",
+                            fontWeight: 700,
+                            padding: "2px 8px",
+                            borderRadius: "999px",
+                            background: isMicOn ? "rgba(255, 71, 87, 0.15)" : "rgba(255, 255, 255, 0.05)",
+                            color: isMicOn ? "#ff4757" : "var(--text-secondary)",
+                            border: `1px solid ${isMicOn ? "rgba(255, 71, 87, 0.3)" : "var(--border-subtle)"}`
+                          }}
+                        >
+                          {isMicOn ? "Live On Air" : "Muted"}
+                        </span>
+                      </div>
+                      <span className="subtle-text" style={{ fontSize: "0.78rem" }}>
+                        {isMicOn ? "Microphone is live over the stream" : "Muted by default • Tap to speak on air"}
+                      </span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={toggleMicrophone}
+                      style={{
+                        padding: "8px 16px",
+                        borderRadius: "999px",
+                        fontWeight: 700,
+                        fontSize: "0.85rem",
+                        cursor: "pointer",
+                        border: "none",
+                        background: isMicOn ? "#ff4757" : "rgba(255, 255, 255, 0.1)",
+                        color: isMicOn ? "#fff" : "var(--text-secondary)",
+                        boxShadow: isMicOn ? "0 0 16px rgba(255, 71, 87, 0.5)" : "none",
+                        transition: "all 0.2s ease"
+                      }}
+                    >
+                      {isMicOn ? "🔴 Mic Live (Tap to Mute)" : "🔇 Mic Muted (Tap to Speak)"}
+                    </button>
+                  </div>
+
+                  {micError && (
+                    <div
+                      style={{
+                        marginBottom: "10px",
+                        padding: "8px 12px",
+                        borderRadius: "var(--radius-sm)",
+                        background: "rgba(245, 158, 11, 0.12)",
+                        border: "1px solid rgba(245, 158, 11, 0.3)",
+                        color: "#fcd34d",
+                        fontSize: "0.8rem",
+                        display: "flex",
+                        alignItems: "center",
+                        justifyContent: "space-between"
+                      }}
+                    >
+                      <span>⚠️ {micError}</span>
+                      <button
+                        type="button"
+                        onClick={() => setMicError("")}
+                        style={{ background: "none", border: "none", color: "#fcd34d", cursor: "pointer" }}
+                        aria-label="Dismiss error"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  )}
+
+                  {isMicOn && (
+                    <div className="fade-in" style={{ display: "flex", alignItems: "center", gap: "12px", marginTop: "10px" }}>
+                      <span className="subtle-text" style={{ fontSize: "0.78rem", minWidth: "70px" }}>
+                        Voice Level: {Math.round(micVolume * 100)}%
+                      </span>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1.5"
+                        step="0.05"
+                        value={micVolume}
+                        onChange={handleMicVolumeChange}
+                        style={{ flex: 1 }}
+                      />
+                    </div>
+                  )}
+                </div>
+              );
+
+              // --- Channel Element: Browser Tab & App Audio ---
+              const appAudioChannel = (
+                <div
+                  key="app-channel"
+                  style={{
+                    background: isMobile
+                      ? "rgba(255, 255, 255, 0.02)"
+                      : isAppAudioActive
+                      ? "rgba(16, 185, 129, 0.08)"
+                      : "rgba(255, 255, 255, 0.03)",
+                    border: isMobile
+                      ? "1px dashed var(--border-subtle)"
+                      : `1px solid ${isAppAudioActive ? "rgba(16, 185, 129, 0.4)" : "var(--border-subtle)"}`,
+                    borderRadius: "var(--radius-control)",
+                    padding: "16px",
+                    opacity: isMobile ? 0.85 : 1,
+                    transition: "all 0.25s ease"
+                  }}
+                >
+                  <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: "12px", flexWrap: "wrap", gap: "10px" }}>
+                    <div>
+                      <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                        <span style={{ fontSize: "1.1rem" }}>💻</span>
+                        <strong style={{ fontSize: "0.95rem" }}>
+                          {isMobile ? "Browser Tab & App Audio" : "App & Tab Audio"}
+                        </strong>
+                        <span
+                          style={{
+                            fontSize: "0.7rem",
+                            fontWeight: 700,
+                            padding: "2px 8px",
+                            borderRadius: "999px",
+                            background: isMobile
+                              ? "rgba(255, 255, 255, 0.05)"
+                              : isAppAudioActive
+                              ? "rgba(16, 185, 129, 0.15)"
+                              : "rgba(255, 255, 255, 0.05)",
+                            color: isMobile
+                              ? "var(--text-secondary)"
+                              : isAppAudioActive
+                              ? "var(--accent-primary)"
+                              : "var(--text-secondary)",
+                            border: `1px solid ${
+                              !isMobile && isAppAudioActive
+                                ? "rgba(16, 185, 129, 0.3)"
+                                : "var(--border-subtle)"
+                            }`
+                          }}
+                        >
+                          {isMobile ? "Desktop Only" : isAppAudioActive ? "Live Streaming" : "Ready"}
+                        </span>
+                      </div>
+                      <span className="subtle-text" style={{ fontSize: "0.78rem" }}>
+                        {isMobile
+                          ? "Available on desktop browsers (Chrome, Edge, Brave, Firefox)"
+                          : isAppAudioActive
+                          ? "Streaming Spotify, YouTube, or tab audio"
+                          : "Stream Spotify, YouTube, or browser tabs"}
+                      </span>
+                    </div>
+
+                    {isMobile ? (
+                      <button
+                        type="button"
+                        disabled
+                        style={{
+                          padding: "8px 16px",
+                          borderRadius: "var(--radius-control)",
+                          fontSize: "0.85rem",
+                          opacity: 0.6,
+                          cursor: "not-allowed",
+                          background: "rgba(255, 255, 255, 0.05)",
+                          color: "var(--text-secondary)",
+                          border: "1px solid var(--border-subtle)"
+                        }}
+                      >
+                        ⊘ Desktop Only
+                      </button>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={isAppAudioActive ? stopAppAudioSharing : startAppAudioSharing}
+                        className={isAppAudioActive ? "button-secondary" : "button-primary"}
+                        style={{ fontSize: "0.85rem", padding: "8px 16px" }}
+                      >
+                        {isAppAudioActive ? "⏹️ Stop Tab Audio" : "🎵 Share Browser Tab Audio"}
+                      </button>
+                    )}
+                  </div>
+
+                  {isMobile ? (
+                    <div
+                      style={{
+                        padding: "8px 12px",
+                        background: "rgba(255, 255, 255, 0.02)",
+                        border: "1px solid var(--border-subtle)",
+                        borderRadius: "var(--radius-sm)",
+                        fontSize: "0.78rem",
+                        color: "var(--text-secondary)",
+                        lineHeight: 1.45
+                      }}
+                    >
+                      💡 <strong>Mobile Sandboxing:</strong> Android and iOS web browsers do not permit capturing audio of other apps running on the phone (such as the native Spotify app). To stream Spotify Web or browser tabs, open TOGETHER on a desktop browser. On this device, use <strong>Music File Player</strong> above.
+                    </div>
+                  ) : (
+                    <>
+                      {isAppAudioActive && (
+                        <div className="fade-in" style={{ display: "flex", alignItems: "center", gap: "12px", marginTop: "10px" }}>
+                          <span className="subtle-text" style={{ fontSize: "0.78rem", minWidth: "70px" }}>
+                            Volume: {Math.round(appAudioVolume * 100)}%
+                          </span>
+                          <input
+                            type="range"
+                            min="0"
+                            max="1.5"
+                            step="0.05"
+                            value={appAudioVolume}
+                            onChange={handleAppAudioVolumeChange}
+                            style={{ flex: 1 }}
+                          />
+                        </div>
+                      )}
+
+                      {appAudioError && (
+                        <div
+                          style={{
+                            marginTop: "12px",
+                            padding: "10px 14px",
+                            borderRadius: "var(--radius-control)",
+                            background: "rgba(245, 158, 11, 0.12)",
+                            border: "1px solid rgba(245, 158, 11, 0.35)",
+                            color: "#fcd34d",
+                            fontSize: "0.82rem",
+                            lineHeight: 1.45,
+                            display: "flex",
+                            alignItems: "flex-start",
+                            gap: "10px"
+                          }}
+                        >
+                          <span style={{ fontSize: "1.1rem" }}>ℹ️</span>
+                          <div style={{ flex: 1 }}>
+                            <strong style={{ display: "block", marginBottom: "2px", color: "#fef3c7" }}>Audio Capture Tip</strong>
+                            {appAudioError}
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setAppAudioError("")}
+                            style={{
+                              background: "none",
+                              border: "none",
+                              color: "#fcd34d",
+                              cursor: "pointer",
+                              fontSize: "1.1rem",
+                              padding: "0 4px"
+                            }}
+                            aria-label="Dismiss notice"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      )}
+
+                      <div
+                        style={{
+                          marginTop: "12px",
+                          padding: "8px 12px",
+                          background: "rgba(255, 255, 255, 0.02)",
+                          border: "1px solid var(--border-subtle)",
+                          borderRadius: "var(--radius-sm)",
+                          fontSize: "0.78rem",
+                          color: "var(--text-secondary)",
+                          lineHeight: 1.4
+                        }}
+                      >
+                        💡 <strong>To stream Spotify or YouTube:</strong> Select a <em>Browser Tab</em> with &ldquo;Share audio&rdquo; checked, or select <em>Entire Screen</em> with &ldquo;Share system audio&rdquo; checked.
+                      </div>
+                    </>
+                  )}
+                </div>
+              );
+
+              // On mobile: Music File Player -> DJ Voice Mic -> Browser Tab Audio (Desktop Only)
+              // On desktop: Browser Tab Audio -> DJ Voice Mic -> Music File Player
+              return isMobile ? (
+                <>
+                  {filePlayerChannel}
+                  {micChannel}
+                  {appAudioChannel}
+                </>
+              ) : (
+                <>
+                  {appAudioChannel}
+                  {micChannel}
+                  {filePlayerChannel}
+                </>
+              );
+            })()}
 
             {/* Stereo VU Meter & Output Monitor */}
             <div

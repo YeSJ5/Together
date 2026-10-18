@@ -135,13 +135,18 @@ export function getListenerCapabilities() {
   };
 }
 
+export function isMobileDevice() {
+  if (typeof navigator === "undefined") return false;
+  return /Android|iPhone|iPad|iPod|Mobile/i.test(navigator.userAgent);
+}
+
 /**
  * Evaluates host capability requirements:
  * Host requires:
  * 1. Secure context
  * 2. WebRTC
  * 3. Channel 1 (Mic): getUserMedia
- * 4. Channel 2 (Tab/Screen Audio): getDisplayMedia with audio
+ * 4. Channel 2 (Tab/Screen Audio): getDisplayMedia with audio (desktop only due to mobile OS sandbox)
  * 5. Channel 3 (File deck): AudioContext / HTML5 audio
  */
 export function getHostCapabilities() {
@@ -150,13 +155,20 @@ export function getHostCapabilities() {
   const mic = supportsUserMedia();
   const displayMedia = supportsDisplayMedia();
   const audio = supportsAudioPlayback();
+  const mobile = isMobileDevice();
 
   return {
     isSecure: secure,
     hasWebRTC: webrtc,
+    isMobile: mobile,
     canHostMic: secure && webrtc && mic,
-    canHostTabAudio: secure && webrtc && displayMedia,
+    canHostTabAudio: secure && webrtc && displayMedia && !mobile,
     canHostAudioFiles: secure && webrtc && audio,
-    isTabAudioSupported: displayMedia
+    isTabAudioSupported: displayMedia && !mobile,
+    tabAudioLimitationReason: mobile
+      ? "Mobile operating systems (Android & iOS) sandbox browsers and do not permit capturing audio from other background apps. To stream directly from Spotify Web or browser tabs, host from a desktop browser (Chrome, Edge, Brave, or Firefox)."
+      : !displayMedia
+      ? "Tab and system audio capture (getDisplayMedia) is not supported in this browser environment."
+      : null
   };
 }
