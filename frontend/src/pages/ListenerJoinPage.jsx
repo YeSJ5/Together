@@ -148,10 +148,15 @@ export default function ListenerJoinPage() {
     animationFrameRef.current = requestAnimationFrame(scanFrame);
   }
 
+  const [isJoining, setIsJoining] = useState(false);
+
   function handleJoinRoom() {
+    if (isJoining) return;
+    setIsJoining(true);
     const finalRoomId = normalizeRoomId(roomId || manualCode);
     if (!finalRoomId) {
       setError("Please specify a valid room code.");
+      setIsJoining(false);
       return;
     }
 
@@ -275,9 +280,10 @@ export default function ListenerJoinPage() {
                     type="button"
                     className="button-primary"
                     onClick={handleJoinRoom}
-                    style={{ width: "100%", justifyContent: "center", padding: "14px", fontSize: "1.05rem" }}
+                    disabled={isJoining}
+                    style={{ width: "100%", justifyContent: "center", padding: "14px", fontSize: "1.05rem", opacity: isJoining ? 0.7 : 1 }}
                   >
-                    Tune In & Listen &rarr;
+                    {isJoining ? "Connecting to Station..." : "Tune In & Listen →"}
                   </button>
 
                   <Link to="/join" className="subtle-text" style={{ textAlign: "center", textDecoration: "none", fontSize: "0.85rem" }}>

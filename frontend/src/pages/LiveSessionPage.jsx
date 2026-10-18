@@ -72,6 +72,7 @@ export default function LiveSessionPage() {
   const chatScrollRef = useRef(null);
   const roomContainerRef = useRef(null);
   const accumulatedHueRef = useRef(150);
+  const lastMeterUpdateRef = useRef(0);
 
   const connectTimerRef = useRef(null);
   const joinTimerRef = useRef(null);
@@ -544,6 +545,10 @@ export default function LiveSessionPage() {
       const dataArray = new Uint8Array(analyser.frequencyBinCount);
       const updateMeter = () => {
         if (!analyserRef.current) return;
+        if (document.hidden) {
+          animFrameRef.current = requestAnimationFrame(updateMeter);
+          return;
+        }
         analyserRef.current.getByteFrequencyData(dataArray);
 
         let sum = 0;
@@ -555,7 +560,12 @@ export default function LiveSessionPage() {
 
         const avg = sum / dataArray.length;
         const bass = Math.min(100, Math.round((bassSum / 4 / 128) * 100));
-        setAudioLevel(Math.min(100, Math.round((avg / 128) * 100)));
+
+        const now = performance.now();
+        if (now - lastMeterUpdateRef.current >= 80) {
+          lastMeterUpdateRef.current = now;
+          setAudioLevel(Math.min(100, Math.round((avg / 128) * 100)));
+        }
 
         // Dynamic DJ ambient color progression
         if (avg > 3) {

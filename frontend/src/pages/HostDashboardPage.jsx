@@ -79,6 +79,7 @@ export default function HostDashboardPage() {
   const masterStreamRef = useRef(null);
   const analyserRef = useRef(null);
   const animFrameRef = useRef(null);
+  const lastMeterUpdateRef = useRef(0);
 
   // Channel Nodes
   const micStreamRef = useRef(null);
@@ -163,10 +164,14 @@ export default function HostDashboardPage() {
     fileGain.connect(ctx.destination); // Route file to host local speaker/headphones too
     fileGainNodeRef.current = fileGain;
 
-    // Visualizer loop
+    // Visualizer loop (throttled to avoid 60fps React state re-render cascades)
     const dataArray = new Uint8Array(analyser.frequencyBinCount);
     const renderMeters = () => {
       if (!analyserRef.current) return;
+      if (document.hidden) {
+        animFrameRef.current = requestAnimationFrame(renderMeters);
+        return;
+      }
       analyserRef.current.getByteFrequencyData(dataArray);
 
       let sum = 0;
@@ -187,9 +192,13 @@ export default function HostDashboardPage() {
       const rAvg = rightSum / (half || 1);
       const bass = Math.min(100, Math.round((bassSum / 4 / 128) * 100));
 
-      setMasterLevel(Math.min(100, Math.round((avg / 128) * 100)));
-      setLeftVu(Math.min(100, Math.round((lAvg / 128) * 100)));
-      setRightVu(Math.min(100, Math.round((rAvg / 128) * 100)));
+      const now = performance.now();
+      if (now - lastMeterUpdateRef.current >= 80) {
+        lastMeterUpdateRef.current = now;
+        setMasterLevel(Math.min(100, Math.round((avg / 128) * 100)));
+        setLeftVu(Math.min(100, Math.round((lAvg / 128) * 100)));
+        setRightVu(Math.min(100, Math.round((rAvg / 128) * 100)));
+      }
 
       // Dynamic DJ ambient color progression
       if (avg > 3) {
@@ -494,6 +503,7 @@ export default function HostDashboardPage() {
 
   // Launch Universal Broadcast Session
   async function handleStartSession() {
+    if (isStarting || session) return;
     setIsStarting(true);
     setError("");
 

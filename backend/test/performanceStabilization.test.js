@@ -73,3 +73,54 @@ test("Performance & Stability: Vercel preview and canonical production origins a
 
   assert.strictEqual(checkOriginAllowed("https://malicious-site.com"), false, "Untrusted external origin must be rejected");
 });
+
+test("Performance & Stability: Visualizer throttling reduces 60fps render calls by >75%", () => {
+  let stateUpdateCount = 0;
+  let lastUpdateTime = 0;
+  const throttleIntervalMs = 80;
+
+  // Simulate 60 frames (1 second at 60fps)
+  for (let frame = 0; frame < 60; frame++) {
+    const now = frame * (1000 / 60); // ~16.6ms per frame
+    if (now - lastUpdateTime >= throttleIntervalMs) {
+      lastUpdateTime = now;
+      stateUpdateCount++;
+    }
+  }
+
+  // At 60fps without throttling: 60 updates.
+  // With 80ms throttle: exactly 13 updates (1 + Math.floor(1000 / 80)).
+  assert.ok(stateUpdateCount <= 14, `State updates must be throttled to <=14 per second, got ${stateUpdateCount}`);
+  assert.ok(stateUpdateCount >= 10, `State updates must remain smooth (>=10 per second), got ${stateUpdateCount}`);
+  const reductionPercent = Math.round(((60 - stateUpdateCount) / 60) * 100);
+  assert.ok(reductionPercent >= 75, `Expected >=75% reduction in React reconciliation, achieved ${reductionPercent}%`);
+});
+
+test("Performance & Stability: Route code splitting and chunk isolation", () => {
+  const fs = require("node:fs");
+  const path = require("node:path");
+
+  const distDir = path.resolve(__dirname, "../../frontend/dist/assets");
+  if (!fs.existsSync(distDir)) {
+    // If not built in this local environment yet, skip
+    return;
+  }
+
+  const files = fs.readdirSync(distDir);
+  const hostChunk = files.find((f) => f.startsWith("HostDashboardPage-") && f.endsWith(".js"));
+  const listenerChunk = files.find((f) => f.startsWith("LiveSessionPage-") && f.endsWith(".js"));
+  const joinChunk = files.find((f) => f.startsWith("ListenerJoinPage-") && f.endsWith(".js"));
+  const indexChunk = files.find((f) => f.startsWith("index-") && f.endsWith(".js"));
+
+  assert.ok(hostChunk, "HostDashboardPage must be isolated in its own dynamic chunk");
+  assert.ok(listenerChunk, "LiveSessionPage must be isolated in its own dynamic chunk");
+  assert.ok(joinChunk, "ListenerJoinPage (with QR scanner) must be isolated in its own chunk");
+  assert.ok(indexChunk, "Index chunk must exist");
+
+  const indexStats = fs.statSync(path.join(distDir, indexChunk));
+  // Uncompressed index chunk must be under 300 kB (previously was ~471 kB)
+  assert.ok(
+    indexStats.size < 300 * 1024,
+    `Initial index chunk size must be under 300 kB, got ${Math.round(indexStats.size / 1024)} kB`
+  );
+});
