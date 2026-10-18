@@ -262,16 +262,16 @@ export default function LiveSessionPage() {
         navigator.mediaSession.playbackState = "playing";
 
         navigator.mediaSession.setActionHandler("play", () => {
-          if (audioElementRef.current) {
-            audioElementRef.current.play();
+          if (persistentAudioRef.current) {
+            persistentAudioRef.current.play();
             setIsPlaying(true);
             if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "playing";
           }
         });
 
         navigator.mediaSession.setActionHandler("pause", () => {
-          if (audioElementRef.current) {
-            audioElementRef.current.pause();
+          if (persistentAudioRef.current) {
+            persistentAudioRef.current.pause();
             setIsPlaying(false);
             if ("mediaSession" in navigator) navigator.mediaSession.playbackState = "paused";
           }
@@ -478,7 +478,6 @@ export default function LiveSessionPage() {
 
   return (
     <AppShell>
-      <audio ref={audioElementRef} autoPlay playsInline style={{ display: "none" }} />
       <div style={{ maxWidth: "980px", margin: "24px auto 0" }}>
         {sessionEnded ? (
           <div className="content-card fade-in" style={{ padding: "48px 32px", textAlign: "center", maxWidth: "500px", margin: "60px auto" }}>

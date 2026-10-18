@@ -202,9 +202,27 @@ export default function ListenerJoinPage() {
             ) : error ? (
               <div style={{ textAlign: "center" }}>
                 <p style={{ color: "var(--accent-rose)", marginBottom: "16px" }}>{error}</p>
-                <Link to="/join" className="button-secondary" style={{ display: "inline-block", textDecoration: "none" }}>
-                  &larr; Try Another Station
-                </Link>
+                <div style={{ display: "flex", gap: "10px", justifyContent: "center" }}>
+                  <button
+                    type="button"
+                    className="button-primary"
+                    onClick={() => {
+                      const normalized = normalizeRoomId(roomId);
+                      setIsLoading(true);
+                      setError("");
+                      fetchSession(normalized)
+                        .then((data) => setRoomData(data))
+                        .catch((err) => setError(err.message || "Room not found or session has ended."))
+                        .finally(() => setIsLoading(false));
+                    }}
+                    style={{ padding: "8px 18px", fontSize: "0.85rem" }}
+                  >
+                    🔄 Retry Connection
+                  </button>
+                  <Link to="/join" className="button-secondary" style={{ display: "inline-block", textDecoration: "none" }}>
+                    &larr; Try Another Station
+                  </Link>
+                </div>
               </div>
             ) : (
               <div>
