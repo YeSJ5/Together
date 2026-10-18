@@ -881,7 +881,7 @@ io.on("connection", (socket) => {
             reason: "Host ended the session."
           });
         }
-      }, 20000);
+      }, 300000); // 5 minutes grace period to prevent abrupt termination during app switching
 
       hostDisconnectTimers.set(roomId, timer);
       return;

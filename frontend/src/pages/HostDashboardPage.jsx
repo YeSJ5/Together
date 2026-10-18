@@ -13,7 +13,8 @@ import { createSpeechRecognizer, isSpeechRecognitionSupported } from "../lib/spe
 import {
   disableNativeBackgroundPlayback,
   enableNativeBackgroundPlayback,
-  isNativeAndroidApp
+  isNativeAndroidApp,
+  startNativeSystemAudioBridge
 } from "../lib/nativeAudio";
 
 export default function HostDashboardPage() {
@@ -40,6 +41,7 @@ export default function HostDashboardPage() {
   const [micVolume, setMicVolume] = useState(1.0);
   const [isAppAudioActive, setIsAppAudioActive] = useState(false);
   const [appAudioVolume, setAppAudioVolume] = useState(1.0);
+  const [appAudioError, setAppAudioError] = useState("");
   
   // Audio File Deck
   const [selectedFileName, setSelectedFileName] = useState("");
@@ -85,6 +87,7 @@ export default function HostDashboardPage() {
   const appAudioStreamRef = useRef(null);
   const appAudioSourceNodeRef = useRef(null);
   const appAudioGainNodeRef = useRef(null);
+  const nativeBridgeRef = useRef(null);
 
   const fileAudioRef = useRef(null);
   const fileSourceNodeRef = useRef(null);
@@ -263,31 +266,91 @@ export default function HostDashboardPage() {
     }
   }
 
-  // Toggle App Audio (Spotify, YouTube, Tabs, Screens)
+  // Toggle App Audio (Spotify, YouTube, Tabs, Screens, Native Android)
   async function startAppAudioSharing() {
+    setAppAudioError("");
     const ctx = initMasterMixer();
     if (ctx.state === "suspended") {
       await ctx.resume();
     }
 
+    // 1. Native Android App capture via TogetherAudio bridge
+    if (isNativeAndroidApp()) {
+      try {
+        if (nativeBridgeRef.current) {
+          await nativeBridgeRef.current.stop().catch(() => {});
+          nativeBridgeRef.current = null;
+        }
+
+        const bridge = await startNativeSystemAudioBridge();
+        nativeBridgeRef.current = bridge;
+
+        const audioTracks = bridge.stream.getAudioTracks();
+        if (audioTracks.length === 0) {
+          throw new Error("No audio track detected from native device capture.");
+        }
+
+        if (appAudioSourceNodeRef.current) {
+          appAudioSourceNodeRef.current.disconnect();
+        }
+
+        const source = ctx.createMediaStreamSource(bridge.stream);
+        appAudioSourceNodeRef.current = source;
+        source.connect(appAudioGainNodeRef.current);
+        setIsAppAudioActive(true);
+        setAppAudioError("");
+        return;
+      } catch (err) {
+        setAppAudioError(err.message || "Failed to start native Android system audio capture.");
+        return;
+      }
+    }
+
+    // 2. Browser getDisplayMedia capture
     try {
       if (!navigator.mediaDevices?.getDisplayMedia) {
-        throw new Error("System/App audio capture is not supported in this browser.");
+        throw new Error("System/App audio capture is not supported in this browser. Please use Chrome, Edge, or Brave.");
       }
 
-      const displayStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false
+      let displayStream;
+      try {
+        // Modern constraints to prioritize audio and avoid capturing host tab
+        displayStream = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            displaySurface: "browser"
+          },
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+            suppressLocalAudioPlayback: false
+          },
+          systemAudio: "include",
+          surfaceSwitching: "include",
+          selfBrowserSurface: "exclude"
+        });
+      } catch (advancedErr) {
+        // Fallback for browsers that reject advanced constraints
+        if (advancedErr.name === "TypeError" || advancedErr.name === "OverconstrainedError") {
+          displayStream = await navigator.mediaDevices.getDisplayMedia({
+            video: true,
+            audio: {
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false
+            }
+          });
+        } else {
+          throw advancedErr;
         }
-      });
+      }
 
       const audioTracks = displayStream.getAudioTracks();
       if (audioTracks.length === 0) {
         displayStream.getTracks().forEach((t) => t.stop());
-        throw new Error("No audio was selected. Remember to check 'Share audio' or 'Also share tab audio'.");
+        throw new Error(
+          "No audio track was selected. In Chrome/Edge: select 'Chrome Tab' with 'Share tab audio' checked, or 'Entire Screen' with 'Share audio' checked. (Note: Individual app windows cannot share audio due to browser OS security)."
+        );
       }
 
       // Keep video tracks alive (disabled) so the browser capture pipeline doesn't terminate on app switch
@@ -309,18 +372,23 @@ export default function HostDashboardPage() {
       source.connect(appAudioGainNodeRef.current);
 
       setIsAppAudioActive(true);
+      setAppAudioError("");
 
       audioTracks[0].onended = () => {
         stopAppAudioSharing();
       };
     } catch (err) {
       if (err.name !== "NotAllowedError") {
-        setError(err.message || "Could not capture device/app audio.");
+        setAppAudioError(err.message || "Could not capture device/app audio.");
       }
     }
   }
 
   function stopAppAudioSharing() {
+    if (nativeBridgeRef.current) {
+      nativeBridgeRef.current.stop().catch(() => {});
+      nativeBridgeRef.current = null;
+    }
     if (appAudioStreamRef.current) {
       appAudioStreamRef.current.getTracks().forEach((t) => t.stop());
       appAudioStreamRef.current = null;
@@ -599,8 +667,8 @@ export default function HostDashboardPage() {
     }
   }
 
-  // Teardown everything on session end
-  function teardownSession() {
+  // Teardown session. isPermanent = true ONLY when host explicitly ends broadcast
+  function teardownSession(isPermanent = false) {
     if (animFrameRef.current) {
       cancelAnimationFrame(animFrameRef.current);
       animFrameRef.current = null;
@@ -622,6 +690,10 @@ export default function HostDashboardPage() {
     if (appAudioStreamRef.current) {
       appAudioStreamRef.current.getTracks().forEach((t) => t.stop());
       appAudioStreamRef.current = null;
+    }
+    if (nativeBridgeRef.current) {
+      nativeBridgeRef.current.stop().catch(() => {});
+      nativeBridgeRef.current = null;
     }
 
     peerConnectionsRef.current.forEach((pc) => pc.close());
@@ -652,34 +724,43 @@ export default function HostDashboardPage() {
       disableNativeBackgroundPlayback().catch(() => {});
     }
 
-    if (socketRef.current) {
-      if (session?.roomId) {
-        socketRef.current.emit("host-ended-session", {
-          roomId: session.roomId,
-          hostKey: hostKeyRef.current
-        });
+    if (isPermanent) {
+      if (socketRef.current) {
+        if (session?.roomId) {
+          socketRef.current.emit("host-ended-session", {
+            roomId: session.roomId,
+            hostKey: hostKeyRef.current
+          });
+        }
+        socketRef.current.disconnect();
+        socketRef.current = null;
       }
-      socketRef.current.disconnect();
-      socketRef.current = null;
-    }
 
-    if (session?.roomId) {
-      endSession(session.roomId, hostKeyRef.current).catch(() => {});
-    }
+      if (session?.roomId) {
+        endSession(session.roomId, hostKeyRef.current).catch(() => {});
+      }
 
-    setSession(null);
-    leaveActiveSession();
-    setConnectedUsers([]);
-    setChatMessages([]);
-    setIsMicOn(false);
-    setIsAppAudioActive(false);
-    setIsFilePlaying(false);
-    setSelectedFileName("");
+      setSession(null);
+      leaveActiveSession();
+      setConnectedUsers([]);
+      setChatMessages([]);
+      setIsMicOn(false);
+      setIsAppAudioActive(false);
+      setIsFilePlaying(false);
+      setSelectedFileName("");
+    }
+  }
+
+  function handleEndBroadcast() {
+    if (window.confirm("Are you sure you want to end this live broadcast? All listeners will be disconnected.")) {
+      teardownSession(true);
+    }
   }
 
   useEffect(() => {
     return () => {
-      teardownSession();
+      // Local resources cleanup on unmount; NEVER terminate the session permanently on backend
+      teardownSession(false);
     };
   }, []);
 
@@ -1086,7 +1167,7 @@ export default function HostDashboardPage() {
             <button
               type="button"
               className="button-danger"
-              onClick={teardownSession}
+              onClick={handleEndBroadcast}
               style={{ fontSize: "0.85rem", padding: "8px 14px" }}
             >
               End Broadcast
@@ -1300,6 +1381,60 @@ export default function HostDashboardPage() {
                   />
                 </div>
               )}
+
+              {appAudioError && (
+                <div
+                  style={{
+                    marginTop: "12px",
+                    padding: "10px 14px",
+                    borderRadius: "var(--radius-control)",
+                    background: "rgba(239, 68, 68, 0.12)",
+                    border: "1px solid rgba(239, 68, 68, 0.35)",
+                    color: "#fca5a5",
+                    fontSize: "0.82rem",
+                    lineHeight: 1.45,
+                    display: "flex",
+                    alignItems: "flex-start",
+                    gap: "10px"
+                  }}
+                >
+                  <span style={{ fontSize: "1.1rem" }}>⚠️</span>
+                  <div style={{ flex: 1 }}>
+                    <strong style={{ display: "block", marginBottom: "2px", color: "#fecaca" }}>App Audio Notice</strong>
+                    {appAudioError}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setAppAudioError("")}
+                    style={{
+                      background: "none",
+                      border: "none",
+                      color: "#fca5a5",
+                      cursor: "pointer",
+                      fontSize: "1.1rem",
+                      padding: "0 4px"
+                    }}
+                    aria-label="Dismiss notice"
+                  >
+                    ✕
+                  </button>
+                </div>
+              )}
+
+              <div
+                style={{
+                  marginTop: "12px",
+                  padding: "8px 12px",
+                  background: "rgba(255, 255, 255, 0.02)",
+                  border: "1px solid var(--border-subtle)",
+                  borderRadius: "var(--radius-sm)",
+                  fontSize: "0.78rem",
+                  color: "var(--text-secondary)",
+                  lineHeight: 1.4
+                }}
+              >
+                💡 <strong>To stream Spotify or YouTube:</strong> Select a <em>Browser Tab</em> with &ldquo;Share audio&rdquo; checked, or select <em>Entire Screen</em> with &ldquo;Share system audio&rdquo; checked. (Individual app windows cannot share sound due to OS security).
+              </div>
             </div>
 
             {/* CHANNEL 3: Audio File Deck (MP3 / WAV / FLAC) */}

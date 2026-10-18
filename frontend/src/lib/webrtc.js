@@ -171,14 +171,36 @@ export async function captureHostAudio(audioSourceMode) {
   // Device / System Audio (Apps, Tabs, Screen)
   if (navigator.mediaDevices?.getDisplayMedia) {
     try {
-      const displayStream = await navigator.mediaDevices.getDisplayMedia({
-        video: true,
-        audio: {
-          echoCancellation: false,
-          noiseSuppression: false,
-          autoGainControl: false
+      let displayStream;
+      try {
+        displayStream = await navigator.mediaDevices.getDisplayMedia({
+          video: {
+            displaySurface: "browser"
+          },
+          audio: {
+            echoCancellation: false,
+            noiseSuppression: false,
+            autoGainControl: false,
+            suppressLocalAudioPlayback: false
+          },
+          systemAudio: "include",
+          surfaceSwitching: "include",
+          selfBrowserSurface: "exclude"
+        });
+      } catch (advancedErr) {
+        if (advancedErr.name === "TypeError" || advancedErr.name === "OverconstrainedError") {
+          displayStream = await navigator.mediaDevices.getDisplayMedia({
+            video: true,
+            audio: {
+              echoCancellation: false,
+              noiseSuppression: false,
+              autoGainControl: false
+            }
+          });
+        } else {
+          throw advancedErr;
         }
-      });
+      }
 
       const audioTracks = displayStream.getAudioTracks();
       if (audioTracks.length > 0) {
