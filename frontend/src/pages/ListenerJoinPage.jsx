@@ -10,7 +10,7 @@ export default function ListenerJoinPage() {
   const { roomId } = useParams();
   const navigate = useNavigate();
 
-  const [activeTab, setActiveTab] = useState(roomId ? "code" : "scan");
+  const [activeTab, setActiveTab] = useState("code");
   const [manualCode, setManualCode] = useState(roomId ? roomId.replace("ROOM-", "") : "");
   const [username, setUsername] = useState(() => {
     const saved = getListenerSession();

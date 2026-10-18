@@ -76,8 +76,22 @@ export function AudioRoomProvider({ children }) {
   }, [isPlaying]);
 
   const attachStreamToAudio = useCallback((stream) => {
-    if (!persistentAudioRef.current) return Promise.resolve(false);
+    if (!persistentAudioRef.current) {
+      if (typeof window !== "undefined") {
+        const audio = new Audio();
+        audio.autoplay = true;
+        audio.playsInline = true;
+        audio.setAttribute("playsinline", "true");
+        audio.setAttribute("webkit-playsinline", "true");
+        persistentAudioRef.current = audio;
+      } else {
+        return Promise.resolve(false);
+      }
+    }
     const audio = persistentAudioRef.current;
+    audio.playsInline = true;
+    audio.setAttribute("playsinline", "true");
+    audio.setAttribute("webkit-playsinline", "true");
     audio.srcObject = stream;
     audio.volume = isMuted ? 0 : volume;
     return audio.play().then(() => {

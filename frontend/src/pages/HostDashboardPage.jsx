@@ -310,7 +310,9 @@ export default function HostDashboardPage() {
     // 2. Browser getDisplayMedia capture
     try {
       if (!navigator.mediaDevices?.getDisplayMedia) {
-        throw new Error("System/App audio capture is not supported in this browser. Please use Chrome, Edge, or Brave.");
+        throw new Error(
+          "Tab/system audio capture (getDisplayMedia) is not supported by your current browser or device. On mobile browsers or iOS Safari, you can broadcast using DJ Voice Mic (Channel 1) or Audio File Player (Channel 3)."
+        );
       }
 
       let displayStream;
@@ -350,7 +352,7 @@ export default function HostDashboardPage() {
       if (audioTracks.length === 0) {
         displayStream.getTracks().forEach((t) => t.stop());
         throw new Error(
-          "No audio track was selected. In Chrome/Edge: select 'Chrome Tab' with 'Share tab audio' checked, or 'Entire Screen' with 'Share audio' checked. (Note: Individual app windows cannot share audio due to browser OS security)."
+          "No audio track was selected. When the browser share dialog appears, make sure to check 'Share audio' or 'Share tab audio'. (Note: Individual application windows typically cannot share audio due to operating system security restrictions)."
         );
       }
 

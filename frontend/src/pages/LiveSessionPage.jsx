@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import AppShell from "../components/AppShell";
 import { useAudioRoom } from "../context/AudioRoomContext";
@@ -13,6 +13,10 @@ import {
   enableNativeBackgroundPlayback,
   isNativeAndroidApp
 } from "../lib/nativeAudio";
+import {
+  getListenerCapabilities,
+  getExternalBrowserUrl
+} from "../lib/capabilities";
 
 export default function LiveSessionPage() {
   const { roomId } = useParams();
@@ -32,6 +36,9 @@ export default function LiveSessionPage() {
     const saved = getListenerSession();
     return saved?.username || "Listener";
   });
+
+  const capabilities = useMemo(() => getListenerCapabilities(), []);
+  const [copiedLink, setCopiedLink] = useState(false);
 
   const [sessionData, setSessionData] = useState(null);
   // Connection state machine: "connecting" | "joining" | "waiting-host" | "connecting-audio" | "playing" | "reconnecting" | "failed"
@@ -123,6 +130,14 @@ export default function LiveSessionPage() {
     let isCancelled = false;
     clearAllTimers();
     candidateQueueRef.current = [];
+
+    // Verify browser capability for real-time WebRTC audio reception
+    if (!capabilities.isCompatible) {
+      setIsVerifying(false);
+      setConnectionStatus("failed");
+      setStatusMessage("Browser environment incompatible for real-time WebRTC audio.");
+      return;
+    }
 
     // Dynamically resolve ICE servers (STUN + TURN) ahead of time
     getDynamicIceServers().catch(() => {});
@@ -618,6 +633,9 @@ export default function LiveSessionPage() {
   }
 
   function handleManualPlay() {
+    if (audioContextRef.current && audioContextRef.current.state === "suspended") {
+      audioContextRef.current.resume().catch(() => {});
+    }
     if (persistentAudioRef.current) {
       persistentAudioRef.current.play()
         .then(() => {
@@ -628,7 +646,9 @@ export default function LiveSessionPage() {
             setupAudioVisualizer(persistentAudioRef.current.srcObject);
           }
         })
-        .catch(() => {});
+        .catch((err) => {
+          console.warn("Manual audio play error:", err);
+        });
     }
   }
 
@@ -679,6 +699,46 @@ export default function LiveSessionPage() {
             <Link to="/" className="button-primary" style={{ display: "inline-block", textDecoration: "none" }}>
               Return to Home
             </Link>
+          </div>
+        ) : !capabilities.isCompatible ? (
+          <div className="content-card fade-in" style={{ padding: "48px 32px", textAlign: "center", maxWidth: "520px", margin: "60px auto" }}>
+            <span style={{ fontSize: "3rem", display: "block", marginBottom: "12px" }}>🌐</span>
+            <h2 style={{ fontSize: "1.5rem", margin: "0 0 8px", color: "var(--accent-cyan)" }}>Browser Compatibility Notice</h2>
+            <p className="subtle-text" style={{ marginBottom: "20px", lineHeight: 1.5 }}>
+              Your current environment does not support real-time WebRTC audio playback:{" "}
+              <strong style={{ color: "var(--text-main)" }}>{capabilities.missingCapabilities.join(", ")}</strong>.
+              {capabilities.isInApp && (
+                <span> You are viewing TOGETHER inside <strong>{capabilities.inAppName || "an in-app browser"}</strong>, which may restrict WebRTC audio.</span>
+              )}
+            </p>
+            <div style={{ display: "flex", flexDirection: "column", gap: "12px", alignItems: "center" }}>
+              <a
+                href={getExternalBrowserUrl(window.location.href)}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="button-primary"
+                style={{ width: "100%", justifyContent: "center", textDecoration: "none" }}
+              >
+                🚀 Open in System Browser
+              </a>
+              <button
+                type="button"
+                className="button-secondary"
+                onClick={() => {
+                  if (navigator.clipboard) {
+                    navigator.clipboard.writeText(window.location.href);
+                    setCopiedLink(true);
+                    setTimeout(() => setCopiedLink(false), 2500);
+                  }
+                }}
+                style={{ width: "100%", justifyContent: "center" }}
+              >
+                {copiedLink ? "✓ Link Copied!" : "📋 Copy Room Link"}
+              </button>
+              <Link to="/" className="button-secondary" style={{ width: "100%", justifyContent: "center", textDecoration: "none" }}>
+                Return to Home
+              </Link>
+            </div>
           </div>
         ) : connectionError && !sessionData ? (
           <div className="content-card fade-in" style={{ padding: "48px 32px", textAlign: "center", maxWidth: "520px", margin: "60px auto" }}>
@@ -953,6 +1013,29 @@ export default function LiveSessionPage() {
                     >
                       ▶️ Tap to Start Audio
                     </button>
+                    {capabilities.isInApp && (
+                      <div style={{ marginTop: "12px", paddingTop: "10px", borderTop: "1px solid rgba(255, 140, 66, 0.2)" }}>
+                        <p className="subtle-text" style={{ fontSize: "0.82rem", margin: "0 0 8px" }}>
+                          Listening in {capabilities.inAppName || "an in-app browser"}? If audio drops or is muted:
+                        </p>
+                        <a
+                          href={getExternalBrowserUrl(window.location.href)}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="button-secondary"
+                          style={{
+                            display: "inline-flex",
+                            alignItems: "center",
+                            gap: "6px",
+                            fontSize: "0.84rem",
+                            padding: "6px 14px",
+                            textDecoration: "none"
+                          }}
+                        >
+                          🌐 Open in External Browser
+                        </a>
+                      </div>
+                    )}
                   </div>
                 )}
 
