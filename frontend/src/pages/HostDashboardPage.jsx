@@ -667,7 +667,12 @@ export default function HostDashboardPage() {
       // When a listener joins, send our master mixer stream over WebRTC
       socket.on("listener-joined-room", async (data) => {
         const listenerId = data.listenerId;
-        if (!listenerId || !masterStreamRef.current) return;
+        if (!listenerId) return;
+
+        if (!masterStreamRef.current) {
+          initMasterMixer();
+        }
+        if (!masterStreamRef.current) return;
 
         try {
           const existing = peerConnectionsRef.current.get(listenerId);
@@ -678,7 +683,10 @@ export default function HostDashboardPage() {
             peerConnectionsRef.current.delete(listenerId);
           }
 
+          const iceServers = await getDynamicIceServers();
+
           const pc = createPeerConnection({
+            iceServers,
             onIceCandidate: (candidate) => {
               socket.emit("signal:ice-candidate", {
                 roomId: newSession.roomId,
@@ -686,6 +694,15 @@ export default function HostDashboardPage() {
                 candidate,
                 senderId: hostIdRef.current
               });
+            },
+            onConnectionStateChange: (state) => {
+              if (state === "failed" || state === "closed") {
+                const conn = peerConnectionsRef.current.get(listenerId);
+                if (conn === pc) {
+                  try { pc.close(); } catch (_) {}
+                  peerConnectionsRef.current.delete(listenerId);
+                }
+              }
             }
           });
 
@@ -732,10 +749,10 @@ export default function HostDashboardPage() {
 
       // Handle ICE candidates from listener (with candidate queuing)
       socket.on("signal:ice-candidate", async (data) => {
+        if (!data?.candidate || !data.senderId) return;
         const pc = peerConnectionsRef.current.get(data.senderId);
-        if (!pc || !data.candidate) return;
 
-        if (!pc.remoteDescription) {
+        if (!pc || !pc.remoteDescription) {
           if (!hostCandidateQueuesRef.current.has(data.senderId)) {
             hostCandidateQueuesRef.current.set(data.senderId, []);
           }
@@ -864,6 +881,8 @@ export default function HostDashboardPage() {
     if (isNativeAndroidApp()) {
       disableNativeBackgroundPlayback().catch(() => {});
     }
+
+    leaveActiveSession();
 
     if (isPermanent) {
       if (socketRef.current) {

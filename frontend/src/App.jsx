@@ -24,6 +24,7 @@ export default function App() {
         <Route path="/join/:roomId" element={<ListenerJoinPage />} />
         <Route path="/listen/:roomId" element={<LiveSessionPage />} />
         <Route path="/session/:roomId" element={<LiveSessionPage />} />
+        <Route path="*" element={<HomePage />} />
       </Routes>
     </Suspense>
   );

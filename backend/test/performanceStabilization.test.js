@@ -57,6 +57,14 @@ test("Performance & Stability: Vercel preview and canonical production origins a
     ) {
       return true;
     }
+    if (
+      /^https?:\/\/(localhost|127\.0\.0\.1)(:[0-9]+)?$/.test(origin) ||
+      /^https?:\/\/(192\.168\.[0-9.]+|10\.[0-9.]+|172\.(1[6-9]|2\d|3[0-1])\.[0-9.]+)(:[0-9]+)?$/.test(origin) ||
+      origin === "capacitor://localhost" ||
+      origin === "http://localhost"
+    ) {
+      return true;
+    }
     return false;
   }
 
@@ -64,7 +72,11 @@ test("Performance & Stability: Vercel preview and canonical production origins a
     "https://together-puce.vercel.app",
     "https://together-listen.vercel.app",
     "https://together-abc123xyz.vercel.app",
-    "https://together-preview-yeshws-projects.vercel.app"
+    "https://together-preview-yeshws-projects.vercel.app",
+    "http://localhost:5173",
+    "http://127.0.0.1:3000",
+    "http://192.168.1.50:5173",
+    "capacitor://localhost"
   ];
 
   for (const origin of validOrigins) {

@@ -1,0 +1,1 @@
+function a(e,n="Guest"){return String(e||"").replace(/[^\p{L}\p{N}\s._-]/gu,"").replace(/\s+/g," ").trim().slice(0,32)||n}function s(e){return String(e||"").toUpperCase().replace(/[^A-Z0-9-]/g,"").slice(0,16)}export{s as n,a as s};

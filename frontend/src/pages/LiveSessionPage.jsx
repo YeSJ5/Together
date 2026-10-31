@@ -307,7 +307,10 @@ export default function LiveSessionPage() {
           peerConnectionRef.current = null;
         }
 
+        const iceServers = await getDynamicIceServers();
+
         const pc = createPeerConnection({
+          iceServers,
           onIceCandidate: (candidate) => {
             socket.emit("signal:ice-candidate", {
               roomId: normalizedRoomId,
@@ -508,6 +511,25 @@ export default function LiveSessionPage() {
   }, [isPlaying]);
 
   function attachRemoteAudio(stream) {
+    if (!stream) return;
+
+    // Listen for onunmute on audio tracks to handle initial packet arrival
+    const tracks = stream.getAudioTracks();
+    tracks.forEach((track) => {
+      track.onunmute = () => {
+        if (persistentAudioRef.current && persistentAudioRef.current.paused && !needsGesture) {
+          persistentAudioRef.current.play().then(() => {
+            setIsPlaying(true);
+            setNeedsGesture(false);
+          }).catch((err) => {
+            if (err && (err.name === "NotAllowedError" || err.name === "AbortError")) {
+              setNeedsGesture(true);
+            }
+          });
+        }
+      };
+    });
+
     setupAudioVisualizer(stream);
     configureMediaSession();
 
@@ -525,6 +547,11 @@ export default function LiveSessionPage() {
 
   function setupAudioVisualizer(stream) {
     try {
+      if (animFrameRef.current) {
+        cancelAnimationFrame(animFrameRef.current);
+        animFrameRef.current = null;
+      }
+
       const AudioCtx = window.AudioContext || window.webkitAudioContext;
       if (!AudioCtx) return;
 
@@ -533,7 +560,7 @@ export default function LiveSessionPage() {
       }
       const ctx = audioContextRef.current;
       if (ctx.state === "suspended") {
-        ctx.resume();
+        ctx.resume().catch(() => {});
       }
 
       const source = ctx.createMediaStreamSource(stream);
@@ -651,6 +678,8 @@ export default function LiveSessionPage() {
         .then(() => {
           setIsPlaying(true);
           setNeedsGesture(false);
+          setConnectionStatus("playing");
+          setStatusMessage("Live Audio Streaming");
           configureMediaSession();
           if (persistentAudioRef.current.srcObject) {
             setupAudioVisualizer(persistentAudioRef.current.srcObject);
@@ -695,6 +724,15 @@ export default function LiveSessionPage() {
 
   function handleLeave() {
     teardownPlayback();
+    if (socketRef.current) {
+      socketRef.current.emit("listener-left-room", {
+        roomId: normalizedRoomId,
+        listenerId
+      });
+      socketRef.current.disconnect();
+      socketRef.current = null;
+    }
+    leaveActiveSession();
     navigate("/");
   }
 

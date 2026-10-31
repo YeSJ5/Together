@@ -57,6 +57,16 @@ function isOriginAllowed(origin) {
     return true;
   }
 
+  // Support local development, LAN host devices, and Capacitor native app origins
+  if (
+    /^https?:\/\/(localhost|127\.0\.0\.1)(:[0-9]+)?$/.test(origin) ||
+    /^https?:\/\/(192\.168\.[0-9.]+|10\.[0-9.]+|172\.(1[6-9]|2\d|3[0-1])\.[0-9.]+)(:[0-9]+)?$/.test(origin) ||
+    origin === "capacitor://localhost" ||
+    origin === "http://localhost"
+  ) {
+    return true;
+  }
+
   return false;
 }
 
